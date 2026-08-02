@@ -1,0 +1,52 @@
+{
+  "_comment": "User-scope MCP servers (live in ~/.claude.json under mcpServers, or add via `claude mcp add --scope user`). Placeholders in <ANGLE_BRACKETS> must be filled in by the installing agent after asking the user. See INSTALL_AGENT.md for prerequisites per server.",
+  "mcpServers": {
+    "brain-fs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "<HOME>/brain"
+      ],
+      "env": {},
+      "_prereq": "Requires the ~/brain directory to exist (personal LLM wiki — synced separately, NOT in this repo). Skip if the user is not restoring the brain system."
+    },
+    "excalidraw": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "<HOME>/tools/mcp_excalidraw/dist/index.js"
+      ],
+      "env": {
+        "EXPRESS_SERVER_URL": "http://localhost:8765",
+        "ENABLE_CANVAS_SYNC": "true",
+        "PORT": "8765"
+      },
+      "_prereq": "Clone https://github.com/yctimlin/mcp_excalidraw.git into ~/tools/mcp_excalidraw, then `npm install && npm run build` so dist/index.js exists."
+    },
+    "monday": {
+      "type": "http",
+      "url": "https://mcp.monday.com/mcp",
+      "_prereq": "OAuth on first use — run /mcp inside Claude Code and authenticate in the browser."
+    },
+    "CompAI": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@trycompai/mcp-server",
+        "start",
+        "--apikey",
+        "<COMPAI_API_KEY>"
+      ],
+      "env": {},
+      "_prereq": "Ask the user for their Comp AI API key (starts with comp_). Do NOT install this server without it."
+    },
+    "gmessages": {
+      "type": "sse",
+      "url": "http://127.0.0.1:7007/mcp/sse",
+      "_prereq": "Requires a locally running Google Messages MCP daemon on port 7007 (separate personal project, not in this repo). Skip unless the user has that daemon on the new machine. If installed, ALSO keep the settings.json permissions.deny list for mcp__gmessages__send_* — the user runs this read-only."
+    }
+  }
+}

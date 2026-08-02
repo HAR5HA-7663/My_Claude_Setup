@@ -1,0 +1,12 @@
+{
+  "skillOverrides": {
+    "algorithmic-art": "user-invocable-only",
+    "auto-diagram": "user-invocable-only",
+    "brand-guidelines": "user-invocable-only",
+    "canvas-design": "name-only",
+    "internal-comms": "off",
+    "job-ranker": "user-invocable-only",
+    "slack-gif-creator": "user-invocable-only",
+    "theme-factory": "name-only"
+  }
+}

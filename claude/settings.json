@@ -1,0 +1,119 @@
+{
+  "env": {
+    "AGENT_BROWSER_HEADED": "1",
+    "AGENT_BROWSER_EXECUTABLE_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "AGENT_BROWSER_PROFILE": "/Users/HAR5HA/.agent-browser/chrome-automation"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(agent-browser:*)"
+    ],
+    "deny": [
+      "mcp__gmessages__send_message",
+      "mcp__gmessages__send_to_conversation",
+      "mcp__gmessages__send_group_message",
+      "mcp__gmessages__send_media_to_conversation",
+      "mcp__gmessages__react_to_message",
+      "mcp__gmessages__import_messages",
+      "mcp__gmessages__set_message_transcript",
+      "mcp__gmessages__draft_message"
+    ],
+    "defaultMode": "auto"
+  },
+  "model": "claude-fable-5[1m]",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/git-push-malware-guard.sh",
+            "if": "Bash(git push *)",
+            "timeout": 30,
+            "statusMessage": "Scanning HEAD for malware payloads before push…"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/local-malware-precheck.sh",
+            "timeout": 30,
+            "statusMessage": "Scanning CWD for malware impostors before npm install/dev…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/local-malware-postcheck.sh",
+            "timeout": 30,
+            "statusMessage": "Scanning CWD for malware after git pull/fetch…"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/pr-babysitter-hook.sh",
+            "timeout": 45,
+            "statusMessage": "Launching PR babysitter (if a PR was just opened)…"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/pr-babysitter-async.sh",
+            "timeout": 1500,
+            "statusMessage": "Babysitting the new PR (base sync + checks)…",
+            "asyncRewake": true,
+            "rewakeMessage": "PR babysitter needs you — the PR you just opened has merge conflicts. Resolve them now, before other work:",
+            "rewakeSummary": "PR has merge conflicts — needs resolution"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/brain/scripts/session_context.sh",
+            "timeout": 15,
+            "statusMessage": "Loading Harsha brain context…"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-custom.sh"
+  },
+  "enabledPlugins": {
+    "caveman@caveman": true,
+    "superpowers@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "slack@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "coderabbit@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "imessage@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    }
+  },
+  "effortLevel": "xhigh",
+  "tui": "fullscreen",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true
+}

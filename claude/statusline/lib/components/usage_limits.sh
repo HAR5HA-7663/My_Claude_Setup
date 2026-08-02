@@ -1,0 +1,794 @@
+#!/bin/bash
+
+# ============================================================================
+# Claude Code Statusline - Usage Limits Component
+# ============================================================================
+#
+# Displays Claude Code rate limit usage from Anthropic's OAuth API.
+# Shows 5-hour session usage and 7-day weekly usage percentages.
+#
+# API Endpoint: https://api.anthropic.com/api/oauth/usage
+# Data Source: Anthropic OAuth API (requires token from keychain)
+#
+# Display Format: 📊 5h: 22% | 7d: 54%
+#
+# Reference: https://codelynx.dev/posts/claude-code-usage-limits-statusline
+# ============================================================================
+
+# Component data storage
+COMPONENT_USAGE_FIVE_HOUR=""
+COMPONENT_USAGE_SEVEN_DAY=""
+COMPONENT_USAGE_FIVE_HOUR_RESET=""
+COMPONENT_USAGE_SEVEN_DAY_RESET=""
+COMPONENT_USAGE_STATUS="unknown"
+
+# Cache TTL for usage API (5 minutes - don't spam the API)
+USAGE_LIMITS_CACHE_TTL="${USAGE_LIMITS_CACHE_TTL:-300}"
+
+# ============================================================================
+# RESET TIME FORMATTING
+# ============================================================================
+
+# Format ISO timestamp to human-readable relative time
+# Input: ISO 8601 timestamp (e.g., "2026-01-13T05:59:59.519761+00:00")
+# Output: "2h9m" for <24h, "Sun07:59" for >24h
+format_reset_time() {
+    local iso_timestamp="$1"
+
+    if [[ -z "$iso_timestamp" || "$iso_timestamp" == "null" ]]; then
+        echo ""
+        return 1
+    fi
+
+    # Parse ISO timestamp to epoch (handle various formats)
+    local reset_epoch
+
+    # Detect epoch timestamp (pure digits = Unix epoch seconds from CC v2.1.80+)
+    if [[ "$iso_timestamp" =~ ^[0-9]+$ ]]; then
+        reset_epoch="$iso_timestamp"
+    else
+        # Remove fractional seconds and normalize timezone for date parsing
+        local normalized_ts
+        normalized_ts=$(echo "$iso_timestamp" | sed 's/\.[0-9]*//')
+
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            # macOS date command - handle UTC (Z or +00:00) properly
+            # Convert +00:00 to +0000 format for %z parsing
+            local mac_ts
+            mac_ts=$(echo "$normalized_ts" | sed 's/+00:00/+0000/; s/Z$/+0000/; s/+\([0-9][0-9]\):\([0-9][0-9]\)/+\1\2/')
+            reset_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$mac_ts" "+%s" 2>/dev/null)
+        else
+            # GNU date command (Linux) - handles ISO 8601 natively
+            reset_epoch=$(date -d "$iso_timestamp" "+%s" 2>/dev/null)
+        fi
+    fi
+
+    if [[ -z "$reset_epoch" ]]; then
+        debug_log "Could not parse reset timestamp: $iso_timestamp" "WARN"
+        echo ""
+        return 1
+    fi
+
+    local now_epoch
+    now_epoch=$(date "+%s")
+
+    local diff_seconds=$((reset_epoch - now_epoch))
+
+    # If already past, return "now"
+    if [[ "$diff_seconds" -le 0 ]]; then
+        echo "now"
+        return 0
+    fi
+
+    # Format based on time remaining
+    if [[ "$diff_seconds" -lt 3600 ]]; then
+        # Less than 1 hour: show minutes
+        local minutes=$((diff_seconds / 60))
+        echo "${minutes}m"
+    elif [[ "$diff_seconds" -lt 86400 ]]; then
+        # Less than 24 hours: show hours and minutes
+        local hours=$((diff_seconds / 3600))
+        local minutes=$(((diff_seconds % 3600) / 60))
+        if [[ "$minutes" -gt 0 ]]; then
+            echo "${hours}h${minutes}m"
+        else
+            echo "${hours}h"
+        fi
+    else
+        # More than 24 hours: show day + time (e.g., "Sun 8:00AM")
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            date -j -f "%s" "$reset_epoch" "+%a %-I:%M%p" 2>/dev/null | sed 's/AM/AM/; s/PM/PM/'
+        else
+            date -d "@$reset_epoch" "+%a %-I:%M%p" 2>/dev/null
+        fi
+    fi
+}
+
+# Get absolute clock time from ISO timestamp: "13:00"
+get_reset_clock_time() {
+    local iso_timestamp="$1"
+
+    if [[ -z "$iso_timestamp" || "$iso_timestamp" == "null" ]]; then
+        echo ""
+        return 1
+    fi
+
+    local reset_epoch
+
+    # Detect epoch timestamp (pure digits = Unix epoch seconds from CC v2.1.80+)
+    if [[ "$iso_timestamp" =~ ^[0-9]+$ ]]; then
+        reset_epoch="$iso_timestamp"
+    else
+        local normalized_ts
+        normalized_ts=$(echo "$iso_timestamp" | sed 's/\.[0-9]*//')
+
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            local mac_ts
+            mac_ts=$(echo "$normalized_ts" | sed 's/+00:00/+0000/; s/Z$/+0000/; s/+\([0-9][0-9]\):\([0-9][0-9]\)/+\1\2/')
+            reset_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$mac_ts" "+%s" 2>/dev/null)
+        else
+            reset_epoch=$(date -d "$iso_timestamp" "+%s" 2>/dev/null)
+        fi
+    fi
+
+    if [[ -z "$reset_epoch" ]]; then
+        echo ""
+        return 1
+    fi
+
+    # Return clock time in HH:MM format
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        date -j -f "%s" "$reset_epoch" "+%H:%M" 2>/dev/null
+    else
+        date -d "@$reset_epoch" "+%H:%M" 2>/dev/null
+    fi
+}
+
+# Format reset time in long format: "1 hr 52 min" (always shows remaining time)
+format_reset_time_long() {
+    local iso_timestamp="$1"
+
+    if [[ -z "$iso_timestamp" || "$iso_timestamp" == "null" ]]; then
+        echo ""
+        return 1
+    fi
+
+    # Parse ISO timestamp to epoch
+    local reset_epoch
+
+    # Detect epoch timestamp (pure digits = Unix epoch seconds from CC v2.1.80+)
+    if [[ "$iso_timestamp" =~ ^[0-9]+$ ]]; then
+        reset_epoch="$iso_timestamp"
+    else
+        local normalized_ts
+        normalized_ts=$(echo "$iso_timestamp" | sed 's/\.[0-9]*//')
+
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            local mac_ts
+            mac_ts=$(echo "$normalized_ts" | sed 's/+00:00/+0000/; s/Z$/+0000/; s/+\([0-9][0-9]\):\([0-9][0-9]\)/+\1\2/')
+            reset_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$mac_ts" "+%s" 2>/dev/null)
+        else
+            reset_epoch=$(date -d "$iso_timestamp" "+%s" 2>/dev/null)
+        fi
+    fi
+
+    if [[ -z "$reset_epoch" ]]; then
+        echo ""
+        return 1
+    fi
+
+    local now_epoch
+    now_epoch=$(date "+%s")
+    local diff_seconds=$((reset_epoch - now_epoch))
+
+    # If already past, return "now"
+    if [[ "$diff_seconds" -le 0 ]]; then
+        echo "now"
+        return 0
+    fi
+
+    # Always format as "X day Y hr Z min" or "Y hr Z min" or "Z min"
+    local days=$((diff_seconds / 86400))
+    local hours=$(((diff_seconds % 86400) / 3600))
+    local minutes=$(((diff_seconds % 3600) / 60))
+
+    if [[ "$days" -gt 0 ]]; then
+        # Show days, hours, and minutes
+        echo "${days} day ${hours} hr ${minutes} min"
+    elif [[ "$hours" -gt 0 ]]; then
+        # Show hours and minutes
+        echo "${hours} hr ${minutes} min"
+    else
+        # Show only minutes
+        echo "${minutes} min"
+    fi
+}
+
+# Get remaining minutes from ISO timestamp
+get_remaining_minutes() {
+    local iso_timestamp="$1"
+
+    if [[ -z "$iso_timestamp" || "$iso_timestamp" == "null" ]]; then
+        echo "0"
+        return 1
+    fi
+
+    local reset_epoch
+
+    # Detect epoch timestamp (pure digits = Unix epoch seconds from CC v2.1.80+)
+    if [[ "$iso_timestamp" =~ ^[0-9]+$ ]]; then
+        reset_epoch="$iso_timestamp"
+    else
+        local normalized_ts
+        normalized_ts=$(echo "$iso_timestamp" | sed 's/\.[0-9]*//')
+
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            local mac_ts
+            mac_ts=$(echo "$normalized_ts" | sed 's/+00:00/+0000/; s/Z$/+0000/; s/+\([0-9][0-9]\):\([0-9][0-9]\)/+\1\2/')
+            reset_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$mac_ts" "+%s" 2>/dev/null)
+        else
+            reset_epoch=$(date -d "$iso_timestamp" "+%s" 2>/dev/null)
+        fi
+    fi
+
+    if [[ -z "$reset_epoch" ]]; then
+        echo "0"
+        return 1
+    fi
+
+    local now_epoch
+    now_epoch=$(date "+%s")
+    local diff_seconds=$((reset_epoch - now_epoch))
+
+    if [[ "$diff_seconds" -le 0 ]]; then
+        echo "0"
+    else
+        echo $((diff_seconds / 60))
+    fi
+}
+
+# Calculate fair value percentage based on elapsed time
+# Args: remaining_minutes, total_window_minutes
+# Returns: fair value percentage (what usage "should" be at this point)
+calculate_fair_value_percentage() {
+    local remaining_minutes="$1"
+    local total_window_minutes="$2"
+
+    if [[ -z "$remaining_minutes" || -z "$total_window_minutes" || "$total_window_minutes" -eq 0 ]]; then
+        echo "0"
+        return 1
+    fi
+
+    # elapsed = total - remaining
+    local elapsed_minutes=$((total_window_minutes - remaining_minutes))
+
+    # Ensure elapsed is not negative
+    if [[ "$elapsed_minutes" -lt 0 ]]; then
+        elapsed_minutes=0
+    fi
+
+    # fair_value = (elapsed / total) * 100, with rounding
+    local fair_value=$(( (elapsed_minutes * 100 + total_window_minutes / 2) / total_window_minutes ))
+
+    # Floor: if any time has elapsed, fair value is at least 1%
+    if [[ "$fair_value" -eq 0 && "$elapsed_minutes" -gt 0 ]]; then
+        fair_value=1
+    fi
+
+    echo "$fair_value"
+}
+
+# ============================================================================
+# OAUTH TOKEN RETRIEVAL
+# ============================================================================
+
+# Get OAuth token from macOS Keychain or Linux secret-tool
+get_claude_oauth_token() {
+    local token=""
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        # macOS: Use security command to get from Keychain
+        token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+    elif command -v secret-tool &>/dev/null; then
+        # Linux: Try secret-tool (GNOME Keyring)
+        token=$(secret-tool lookup service "Claude Code-credentials" 2>/dev/null)
+    fi
+
+    if [[ -n "$token" ]]; then
+        # Parse JSON to extract access_token (handle nested structure)
+        local access_token
+        # Try nested path first (claudeAiOauth.accessToken), then flat paths
+        access_token=$(echo "$token" | jq -r '.claudeAiOauth.accessToken // .accessToken // .access_token // empty' 2>/dev/null)
+
+        if [[ -n "$access_token" && "$access_token" != "null" ]]; then
+            echo "$access_token"
+            return 0
+        fi
+    fi
+
+    debug_log "Could not retrieve OAuth token from keychain" "WARN"
+    echo ""
+    return 1
+}
+
+# ============================================================================
+# USAGE API FETCHING
+# ============================================================================
+
+# Get file modification time in epoch seconds (cross-platform)
+_usage_file_mtime() {
+    local file="$1"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        stat -f %m "$file" 2>/dev/null || echo 0
+    else
+        stat -c %Y "$file" 2>/dev/null || echo 0
+    fi
+}
+
+# Fetch usage limits from Anthropic OAuth API
+# Uses GLOBAL cache (shared across all sessions — usage limits are account-level)
+# Implements negative caching to avoid hammering API on 429/errors
+fetch_usage_limits() {
+    local token
+    token=$(get_claude_oauth_token)
+
+    if [[ -z "$token" ]]; then
+        debug_log "No OAuth token available for usage limits" "INFO"
+        echo ""
+        return 1
+    fi
+
+    # Global cache paths (shared across ALL sessions — account-level data)
+    local cache_dir="${CACHE_BASE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-code-statusline}"
+    [[ -d "$cache_dir" ]] || mkdir -p "$cache_dir" 2>/dev/null
+    local cache_file="${cache_dir}/usage_limits_global.cache"
+    local negative_cache="${cache_dir}/usage_limits_negative.cache"
+    local now
+    now=$(date +%s)
+
+    # Check negative cache first (avoid hammering API after 429/error)
+    # Format: first line = TTL in seconds, mtime = when set
+    if [[ -f "$negative_cache" ]]; then
+        local neg_mtime neg_age neg_ttl
+        neg_mtime=$(_usage_file_mtime "$negative_cache")
+        neg_age=$((now - neg_mtime))
+        neg_ttl=$(head -1 "$negative_cache" 2>/dev/null)
+        [[ "$neg_ttl" =~ ^[0-9]+$ ]] || neg_ttl=60
+        if [[ "$neg_age" -lt "$neg_ttl" ]]; then
+            debug_log "Skipping OAuth API (negative cache, ${neg_age}s/${neg_ttl}s)" "DEBUG"
+            # Return stale positive cache if available
+            if [[ -f "$cache_file" ]]; then
+                cat "$cache_file" 2>/dev/null
+                return 0
+            fi
+            echo ""
+            return 1
+        fi
+        rm -f "$negative_cache" 2>/dev/null
+    fi
+
+    # Check positive cache (fresh data within TTL)
+    if [[ -f "$cache_file" ]]; then
+        local cache_mtime cache_age
+        cache_mtime=$(_usage_file_mtime "$cache_file")
+        cache_age=$((now - cache_mtime))
+        if [[ "$cache_age" -lt "$USAGE_LIMITS_CACHE_TTL" ]]; then
+            debug_log "Using cached usage limits (${cache_age}s old, TTL=${USAGE_LIMITS_CACHE_TTL}s)" "INFO"
+            cat "$cache_file" 2>/dev/null
+            return 0
+        fi
+    fi
+
+    # Fetch from API — capture headers to a temp file for Retry-After parsing
+    local header_file="${cache_dir}/usage_limits_headers.tmp"
+    local response http_code body
+    response=$(curl -s -D "$header_file" -w "\n%{http_code}" --max-time 5 \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -H "anthropic-beta: oauth-2025-04-20" \
+        -H "Accept: application/json" \
+        "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || {
+        debug_log "OAuth API connection failed (curl error)" "WARN"
+        echo "60" > "$negative_cache" 2>/dev/null
+        rm -f "$header_file" 2>/dev/null
+        # Return stale cache if available
+        if [[ -f "$cache_file" ]]; then
+            cat "$cache_file" 2>/dev/null
+            return 0
+        fi
+        echo ""
+        return 1
+    }
+
+    # Split response body and HTTP status code
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    # Parse Retry-After header (seconds) for negative cache TTL
+    local retry_after=60
+    if [[ -f "$header_file" ]]; then
+        local ra
+        ra=$(grep -i '^retry-after:' "$header_file" 2>/dev/null | head -1 | tr -d '\r' | awk '{print $2}')
+        [[ "$ra" =~ ^[0-9]+$ ]] && retry_after="$ra"
+        # Enforce minimum TTL: retry-after:0 causes infinite 429 loop
+        [[ "$retry_after" -lt 30 ]] && retry_after=30
+        rm -f "$header_file" 2>/dev/null
+    fi
+
+    case "$http_code" in
+        200)
+            if [[ -n "$body" ]] && echo "$body" | jq -e '.five_hour' &>/dev/null; then
+                echo "$body" > "$cache_file" 2>/dev/null
+                rm -f "$negative_cache" 2>/dev/null
+                debug_log "Fetched fresh usage limits from API (200 OK)" "INFO"
+                echo "$body"
+                return 0
+            else
+                debug_log "OAuth API returned 200 but invalid JSON body" "WARN"
+                echo "60" > "$negative_cache" 2>/dev/null
+            fi
+            ;;
+        401)
+            debug_log "OAuth token expired/invalid (401) - re-authenticate Claude Code" "WARN"
+            echo "300" > "$negative_cache" 2>/dev/null
+            ;;
+        403)
+            debug_log "OAuth access forbidden (403)" "WARN"
+            echo "300" > "$negative_cache" 2>/dev/null
+            ;;
+        429)
+            # Exponential backoff: double TTL on each consecutive 429 (30→60→120→240→300 cap)
+            local prev_ttl=0
+            [[ -f "$negative_cache" ]] && prev_ttl=$(head -1 "$negative_cache" 2>/dev/null)
+            [[ "$prev_ttl" =~ ^[0-9]+$ ]] || prev_ttl=0
+            local backoff_ttl=$((prev_ttl * 2))
+            [[ "$backoff_ttl" -lt "$retry_after" ]] && backoff_ttl="$retry_after"
+            [[ "$backoff_ttl" -gt 300 ]] && backoff_ttl=300
+            debug_log "OAuth API rate limited (429) - backoff ${backoff_ttl}s (was ${prev_ttl}s)" "WARN"
+            echo "$backoff_ttl" > "$negative_cache" 2>/dev/null
+            ;;
+        5[0-9][0-9])
+            debug_log "OAuth API server error ($http_code) - retrying once" "WARN"
+            sleep 0.5
+            response=$(curl -s -w "\n%{http_code}" --max-time 2 \
+                -H "Authorization: Bearer $token" \
+                -H "Content-Type: application/json" \
+                -H "anthropic-beta: oauth-2025-04-20" \
+                -H "Accept: application/json" \
+                "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || true
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+            if [[ "$http_code" == "200" ]] && echo "$body" | jq -e '.five_hour' &>/dev/null; then
+                echo "$body" > "$cache_file" 2>/dev/null
+                rm -f "$negative_cache" 2>/dev/null
+                debug_log "OAuth API retry succeeded" "INFO"
+                echo "$body"
+                return 0
+            fi
+            debug_log "OAuth API retry failed ($http_code)" "WARN"
+            echo "120" > "$negative_cache" 2>/dev/null
+            ;;
+        "")
+            debug_log "OAuth API timeout or no response" "WARN"
+            echo "60" > "$negative_cache" 2>/dev/null
+            ;;
+        *)
+            debug_log "OAuth API unexpected status: $http_code" "WARN"
+            echo "60" > "$negative_cache" 2>/dev/null
+            ;;
+    esac
+
+    # Return stale cache if available (better than nothing)
+    if [[ -f "$cache_file" ]]; then
+        debug_log "Returning stale usage limits cache after API failure" "INFO"
+        cat "$cache_file" 2>/dev/null
+        return 0
+    fi
+
+    echo ""
+    return 1
+}
+
+# ============================================================================
+# COMPONENT DATA COLLECTION
+# ============================================================================
+
+# Collect usage limits data from Anthropic API
+collect_usage_limits_data() {
+    debug_log "Collecting usage_limits component data" "INFO"
+
+    COMPONENT_USAGE_FIVE_HOUR=""
+    COMPONENT_USAGE_SEVEN_DAY=""
+    COMPONENT_USAGE_FIVE_HOUR_RESET=""
+    COMPONENT_USAGE_SEVEN_DAY_RESET=""
+
+    local usage_data=""
+
+    # Priority 1: Native rate_limits from CC v2.1.80+ (zero-latency, no network)
+    if [[ -n "${STATUSLINE_INPUT_JSON:-}" ]]; then
+        local rl_five_pct rl_seven_pct
+        rl_five_pct=$(echo "$STATUSLINE_INPUT_JSON" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+        rl_seven_pct=$(echo "$STATUSLINE_INPUT_JSON" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null)
+        if [[ -n "$rl_five_pct" || -n "$rl_seven_pct" ]]; then
+            # Build OAuth-compatible structure for downstream extraction
+            usage_data=$(echo "$STATUSLINE_INPUT_JSON" | jq '{
+                five_hour: {
+                    utilization: .rate_limits.five_hour.used_percentage,
+                    resets_at: (if .rate_limits.five_hour.resets_at then (.rate_limits.five_hour.resets_at | tostring) else null end)
+                },
+                seven_day: {
+                    utilization: .rate_limits.seven_day.used_percentage,
+                    resets_at: (if .rate_limits.seven_day.resets_at then (.rate_limits.seven_day.resets_at | tostring) else null end)
+                }
+            }' 2>/dev/null)
+            debug_log "Using native rate_limits from CC v2.1.80+ JSON" "INFO"
+        fi
+    fi
+
+    # Priority 1b: Legacy native JSON (pre-v2.1.80 format: .five_hour.utilization)
+    if [[ -z "$usage_data" && -n "${STATUSLINE_INPUT_JSON:-}" ]]; then
+        local has_legacy
+        has_legacy=$(echo "$STATUSLINE_INPUT_JSON" | jq -r 'if .five_hour.utilization then "yes" elif .seven_day.utilization then "yes" else empty end' 2>/dev/null)
+        if [[ "$has_legacy" == "yes" ]]; then
+            usage_data="$STATUSLINE_INPUT_JSON"
+            debug_log "Using legacy native JSON input for usage limits" "INFO"
+        fi
+    fi
+
+    # Priority 2: OAuth API fallback (slower, requires token)
+    if [[ -z "$usage_data" ]]; then
+        usage_data=$(fetch_usage_limits) || true
+        if [[ -n "$usage_data" ]]; then
+            debug_log "Using OAuth API for usage limits" "INFO"
+        fi
+    fi
+
+    if [[ -n "$usage_data" ]]; then
+        # Extract 5-hour (session) usage
+        COMPONENT_USAGE_FIVE_HOUR=$(echo "$usage_data" | jq -r '.five_hour.utilization // empty' 2>/dev/null)
+        COMPONENT_USAGE_FIVE_HOUR_RESET=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
+
+        # Extract 7-day (weekly) usage
+        COMPONENT_USAGE_SEVEN_DAY=$(echo "$usage_data" | jq -r '.seven_day.utilization // empty' 2>/dev/null)
+        COMPONENT_USAGE_SEVEN_DAY_RESET=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty' 2>/dev/null)
+
+        # Round percentages to integers
+        if [[ -n "$COMPONENT_USAGE_FIVE_HOUR" ]]; then
+            COMPONENT_USAGE_FIVE_HOUR=$(printf "%.0f" "$COMPONENT_USAGE_FIVE_HOUR" 2>/dev/null)
+        fi
+        if [[ -n "$COMPONENT_USAGE_SEVEN_DAY" ]]; then
+            COMPONENT_USAGE_SEVEN_DAY=$(printf "%.0f" "$COMPONENT_USAGE_SEVEN_DAY" 2>/dev/null)
+        fi
+
+        debug_log "usage_limits data: 5h=${COMPONENT_USAGE_FIVE_HOUR}%, 7d=${COMPONENT_USAGE_SEVEN_DAY}%" "INFO"
+        COMPONENT_USAGE_STATUS="ok"
+    else
+        # Detect rate-limited state: negative cache exists but no positive cache
+        local _neg_cache="${CACHE_BASE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-code-statusline}/usage_limits_negative.cache"
+        if [[ -f "$_neg_cache" ]]; then
+            debug_log "No usage limits data (rate limited - negative cache active)" "INFO"
+            COMPONENT_USAGE_STATUS="rate_limited"
+        else
+            debug_log "No usage limits data available (no native JSON, no OAuth)" "INFO"
+            COMPONENT_USAGE_STATUS="unavailable"
+        fi
+    fi
+
+    return 0
+}
+
+# Alias for usage_reset component (shares same data as usage_limits)
+collect_usage_reset_data() {
+    collect_usage_limits_data
+}
+
+# ============================================================================
+# COMPONENT RENDERING
+# ============================================================================
+
+# Render usage limits display (percentages only - reset times in separate component)
+render_usage_limits() {
+    local theme_enabled="${1:-true}"
+
+    # Skip if no data available
+    if [[ -z "$COMPONENT_USAGE_FIVE_HOUR" && -z "$COMPONENT_USAGE_SEVEN_DAY" ]]; then
+        return 1  # No content - skip this component
+    fi
+
+    # Get thresholds from config
+    local warn_threshold="${CONFIG_USAGE_WARN_THRESHOLD:-50}"
+    local critical_threshold="${CONFIG_USAGE_CRITICAL_THRESHOLD:-80}"
+
+    local output=""
+    local label="${CONFIG_USAGE_LABEL:-Limit:}"
+
+    # Build output with colors based on usage level
+    if [[ -n "$COMPONENT_USAGE_FIVE_HOUR" ]]; then
+        local five_hour_color=""
+        if [[ "$theme_enabled" == "true" ]] && is_module_loaded "themes"; then
+            if [[ "$COMPONENT_USAGE_FIVE_HOUR" -ge "$critical_threshold" ]]; then
+                five_hour_color="${CONFIG_RED:-}"
+            elif [[ "$COMPONENT_USAGE_FIVE_HOUR" -ge "$warn_threshold" ]]; then
+                five_hour_color="${CONFIG_YELLOW:-}"
+            else
+                five_hour_color="${CONFIG_GREEN:-}"
+            fi
+        fi
+        output="${label} ${five_hour_color}5h:${COMPONENT_USAGE_FIVE_HOUR}%${COLOR_RESET:-}"
+    fi
+
+    if [[ -n "$COMPONENT_USAGE_SEVEN_DAY" ]]; then
+        local seven_day_color=""
+        if [[ "$theme_enabled" == "true" ]] && is_module_loaded "themes"; then
+            if [[ "$COMPONENT_USAGE_SEVEN_DAY" -ge "$critical_threshold" ]]; then
+                seven_day_color="${CONFIG_RED:-}"
+            elif [[ "$COMPONENT_USAGE_SEVEN_DAY" -ge "$warn_threshold" ]]; then
+                seven_day_color="${CONFIG_YELLOW:-}"
+            else
+                seven_day_color="${CONFIG_GREEN:-}"
+            fi
+        fi
+
+        if [[ -n "$output" ]]; then
+            output="${output} • ${seven_day_color}7d:${COMPONENT_USAGE_SEVEN_DAY}%${COLOR_RESET:-}"
+        else
+            output="${label} ${seven_day_color}7d:${COMPONENT_USAGE_SEVEN_DAY}%${COLOR_RESET:-}"
+        fi
+    fi
+
+    echo "$output"
+}
+
+# ============================================================================
+# USAGE RESET COMPONENT (Separate display for reset countdown)
+# ============================================================================
+
+# Render combined usage info (reset time + percentage) for line 5
+# Format: ⏱ 5H at HH:MM (X hr Y min) actual%/fair% • 7DAY at HH:MM (X day Y hr Z min) actual%/fair%
+# Monochrome style (light gray + italic) to match old RESET component
+render_usage_reset() {
+    local theme_enabled="${1:-true}"
+
+    # Show fallback when rate-limited (don't hide the line entirely)
+    if [[ -z "$COMPONENT_USAGE_FIVE_HOUR" && -z "$COMPONENT_USAGE_SEVEN_DAY" ]]; then
+        if [[ "$COMPONENT_USAGE_STATUS" == "rate_limited" ]]; then
+            local dim_color="" reset_color=""
+            if [[ "$theme_enabled" == "true" ]] && is_module_loaded "themes"; then
+                dim_color="${CONFIG_LIGHT_GRAY:-\033[90m}"
+                reset_color="${COLOR_RESET:-\033[0m}"
+            fi
+            echo -e "${dim_color}⏱ Usage data temporarily unavailable (rate limited)${reset_color}"
+            return 0
+        fi
+        return 1  # No content - skip this component
+    fi
+
+    # Monochrome styling (light gray + italic)
+    local dim_color="" italic="" reset_color=""
+
+    if [[ "$theme_enabled" == "true" ]] && is_module_loaded "themes"; then
+        dim_color="${CONFIG_LIGHT_GRAY:-\033[90m}"
+        italic="${CONFIG_ITALIC:-\033[3m}"
+        reset_color="${COLOR_RESET:-\033[0m}"
+    fi
+
+    local output=""
+
+    # 5-hour window (300 minutes): show "at HH:MM (X hr Y min) actual%/fair%"
+    if [[ -n "$COMPONENT_USAGE_FIVE_HOUR" ]]; then
+        local clock_time="" remaining="" remaining_mins="" fair_value=""
+        if [[ -n "$COMPONENT_USAGE_FIVE_HOUR_RESET" ]]; then
+            clock_time=$(get_reset_clock_time "$COMPONENT_USAGE_FIVE_HOUR_RESET")
+            remaining=$(format_reset_time_long "$COMPONENT_USAGE_FIVE_HOUR_RESET")
+            remaining_mins=$(get_remaining_minutes "$COMPONENT_USAGE_FIVE_HOUR_RESET")
+            fair_value=$(calculate_fair_value_percentage "$remaining_mins" 300)
+        fi
+        if [[ -n "$clock_time" && "$remaining" != "now" ]]; then
+            output="⏱ 5H at ${clock_time} (${remaining}) ${COMPONENT_USAGE_FIVE_HOUR}%/${fair_value}%"
+        else
+            output="⏱ 5H ${remaining:-now} (${COMPONENT_USAGE_FIVE_HOUR}%)"
+        fi
+    fi
+
+    # 7-day window (10080 minutes): show "at HH:MM (X day Y hr Z min) actual%/fair%"
+    if [[ -n "$COMPONENT_USAGE_SEVEN_DAY" ]]; then
+        local clock_time="" remaining="" remaining_mins="" fair_value=""
+        if [[ -n "$COMPONENT_USAGE_SEVEN_DAY_RESET" ]]; then
+            clock_time=$(get_reset_clock_time "$COMPONENT_USAGE_SEVEN_DAY_RESET")
+            remaining=$(format_reset_time_long "$COMPONENT_USAGE_SEVEN_DAY_RESET")
+            remaining_mins=$(get_remaining_minutes "$COMPONENT_USAGE_SEVEN_DAY_RESET")
+            fair_value=$(calculate_fair_value_percentage "$remaining_mins" 10080)
+        fi
+        if [[ -n "$output" ]]; then
+            if [[ -n "$clock_time" && "$remaining" != "now" ]]; then
+                output="${output} • 7DAY at ${clock_time} (${remaining}) ${COMPONENT_USAGE_SEVEN_DAY}%/${fair_value}%"
+            else
+                output="${output} • 7DAY ${remaining:-now} (${COMPONENT_USAGE_SEVEN_DAY}%)"
+            fi
+        else
+            if [[ -n "$clock_time" && "$remaining" != "now" ]]; then
+                output="⏱ 7DAY at ${clock_time} (${remaining}) ${COMPONENT_USAGE_SEVEN_DAY}%/${fair_value}%"
+            else
+                output="⏱ 7DAY ${remaining:-now} (${COMPONENT_USAGE_SEVEN_DAY}%)"
+            fi
+        fi
+    fi
+
+    if [[ -n "$output" ]]; then
+        echo -e "${dim_color}${italic}${output}${reset_color}"
+        return 0
+    fi
+
+    return 1  # No content
+}
+
+# Get usage limits configuration
+get_usage_limits_config() {
+    local key="${1:-component_name}"
+    local default="${2:-}"
+
+    case "$key" in
+        "component_name"|"name")
+            echo "usage_limits"
+            ;;
+        "enabled")
+            echo "${CONFIG_FEATURES_SHOW_USAGE_LIMITS:-${default:-true}}"
+            ;;
+        "label")
+            echo "${CONFIG_USAGE_LABEL:-${default:-Limit:}}"
+            ;;
+        "warn_threshold")
+            echo "${CONFIG_USAGE_WARN_THRESHOLD:-${default:-50}}"
+            ;;
+        "critical_threshold")
+            echo "${CONFIG_USAGE_CRITICAL_THRESHOLD:-${default:-80}}"
+            ;;
+        "cache_ttl")
+            echo "${USAGE_LIMITS_CACHE_TTL:-${default:-300}}"
+            ;;
+        "reset_label")
+            echo "${CONFIG_USAGE_RESET_LABEL:-${default:-Reset:}}"
+            ;;
+        "description")
+            echo "Claude Code rate limit usage (5h session, 7d weekly)"
+            ;;
+        *)
+            echo "$default"
+            ;;
+    esac
+}
+
+# ============================================================================
+# COMPONENT INTERFACE COMPLIANCE
+# ============================================================================
+
+# Component metadata
+USAGE_LIMITS_COMPONENT_NAME="usage_limits"
+USAGE_LIMITS_COMPONENT_DESCRIPTION="Claude Code rate limit usage (5h session, 7d weekly)"
+USAGE_LIMITS_COMPONENT_VERSION="2.15.0"
+USAGE_LIMITS_COMPONENT_DEPENDENCIES=("cache")
+
+# ============================================================================
+# COMPONENT REGISTRATION
+# ============================================================================
+
+# Register the usage_limits component (percentages)
+register_component \
+    "usage_limits" \
+    "Claude Code rate limit usage (5h session, 7d weekly)" \
+    "cache" \
+    "true"
+
+# Register the usage_reset component (reset countdown times)
+register_component \
+    "usage_reset" \
+    "Claude Code rate limit reset countdown (5h session, 7d weekly)" \
+    "cache" \
+    "true"
+
+# Export component functions
+export -f _usage_file_mtime get_claude_oauth_token fetch_usage_limits format_reset_time format_reset_time_long
+export -f get_remaining_minutes calculate_fair_value_percentage get_reset_clock_time
+export -f collect_usage_limits_data collect_usage_reset_data render_usage_limits render_usage_reset get_usage_limits_config
+
+debug_log "Usage limits component loaded" "INFO"

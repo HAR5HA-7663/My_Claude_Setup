@@ -1,0 +1,272 @@
+{
+  "name": "My_Claude_Setup",
+  "owner": "HAR5HA-7663",
+  "exported": "2026-08-02",
+  "source_machine": "macOS (darwin 25.5.0), Claude Code with model claude-fable-5[1m]",
+  "install_doc": "INSTALL_AGENT.md",
+  "components": [
+    {
+      "id": "core-settings",
+      "label": "Core settings (model, hooks, statusline ref, permissions, env)",
+      "payload": [
+        "claude/settings.json",
+        "claude/settings.local.json"
+      ],
+      "target": "~/.claude/settings.json + ~/.claude/settings.local.json",
+      "default": true,
+      "notes": "Paths inside are macOS-specific — installing agent must rewrite /Users/HAR5HA -> new home, Chrome executable path per OS. Hook entries reference claude/scripts and the brain; strip hook entries for components the user did not select."
+    },
+    {
+      "id": "global-claude-md",
+      "label": "Global CLAUDE.md (personal brain rules, model tiering, agent-browser default, writing style)",
+      "payload": [
+        "claude/CLAUDE.md",
+        "extras/harsha-slack-writing-style.md"
+      ],
+      "target": "~/.claude/CLAUDE.md; style guide to a path of user's choice (update the reference inside CLAUDE.md)",
+      "default": true,
+      "notes": "References ~/brain (separate system) — if brain is not restored, comment out the Personal Brain section or expect harmless noise."
+    },
+    {
+      "id": "skills",
+      "label": "User skills (36)",
+      "payload": [
+        "claude/skills/"
+      ],
+      "target": "~/.claude/skills/",
+      "default": true,
+      "sub_selectable": true,
+      "items": [
+        {
+          "name": "algorithmic-art",
+          "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic …"
+        },
+        {
+          "name": "auto-diagram",
+          "description": "Automatically analyze a codebase and generate an architecture diagram with zero configuration. Use when the user asks to \"diagram this repo\", \"visualize the architecture\", \"auto di…"
+        },
+        {
+          "name": "banner-design",
+          "description": "Design banners for social media, ads, website heroes, creative assets, and print. Multiple art direction options with AI-generated visuals. Actions: design, create, generate banner…"
+        },
+        {
+          "name": "brain-query",
+          "description": "Semantic two-tier retrieval over the personal brain at ~/brain/. Queries brain_wiki (synthesized pages) first, falls back to brain_raw (raw source chunks) if confidence is low, and…"
+        },
+        {
+          "name": "brain-status",
+          "description": "Show health of the ~/brain/ vector store — collection counts (brain_raw, brain_wiki), indexed vs unindexed files, watcher daemon status, embedding-model consistency, and privacy-mo…"
+        },
+        {
+          "name": "brand",
+          "description": "Brand voice, visual identity, messaging frameworks, asset management, brand consistency. Activate for branded content, tone of voice, marketing assets, brand compliance, style guid…"
+        },
+        {
+          "name": "brand-guidelines",
+          "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guideline…"
+        },
+        {
+          "name": "canvas-design",
+          "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other stat…"
+        },
+        {
+          "name": "council",
+          "description": "Karpathy-style LLM Council for decisions. Runs 5 independent advisors in parallel (Contrarian, First Principles, Expansionist, Outsider, Executor), then anonymous peer review where…"
+        },
+        {
+          "name": "design",
+          "description": "Comprehensive design skill: brand identity, design tokens, UI styling, logo generation (55 styles, Gemini AI), corporate identity program (50 deliverables, CIP mockups), HTML prese…"
+        },
+        {
+          "name": "design-system",
+          "description": "Token architecture, component specifications, and slide generation. Three-layer tokens (primitive→semantic→component), CSS variables, spacing/typography scales, component specs, st…"
+        },
+        {
+          "name": "doc-coauthoring",
+          "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structur…"
+        },
+        {
+          "name": "docx",
+          "description": "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with prof…"
+        },
+        {
+          "name": "excalidraw",
+          "description": "Generate architecture diagrams on a live Excalidraw canvas when the user provides specific components, a sample diagram, or a textual description of what to draw. Use for data flow…"
+        },
+        {
+          "name": "frontend-design",
+          "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applicat…"
+        },
+        {
+          "name": "internal-comms",
+          "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some …"
+        },
+        {
+          "name": "job-applicator",
+          "description": "Personal job application assistant for Harsha Vardhan Yellela. Use this skill when the user asks to apply for jobs, submit applications on LinkedIn, Indeed, MigrateMate, or any job…"
+        },
+        {
+          "name": "job-ranker",
+          "description": "|"
+        },
+        {
+          "name": "mcp-builder",
+          "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers …"
+        },
+        {
+          "name": "pdf",
+          "description": "Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a PDF form o…"
+        },
+        {
+          "name": "pptx",
+          "description": "Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) …"
+        },
+        {
+          "name": "skill-creator",
+          "description": "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specializ…"
+        },
+        {
+          "name": "slack-gif-creator",
+          "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Sla…"
+        },
+        {
+          "name": "slides",
+          "description": "Create strategic HTML presentations with Chart.js, design tokens, responsive layouts, copywriting formulas, and contextual slide strategies."
+        },
+        {
+          "name": "theme-factory",
+          "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can app…"
+        },
+        {
+          "name": "ui-styling",
+          "description": "Create beautiful, accessible user interfaces with shadcn/ui components (built on Radix UI + Tailwind), Tailwind CSS utility-first styling, and canvas-based visual designs. Use when…"
+        },
+        {
+          "name": "ui-ux-pro-max",
+          "description": "UI/UX design intelligence. Searchable local database with 67 styles, 161 palettes, 57 font pairings, 25 charts, and 21 stacks (React, Next.js, Vue, Svelte, Astro, SwiftUI, React Na…"
+        },
+        {
+          "name": "web-artifacts-builder",
+          "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts r…"
+        },
+        {
+          "name": "webapp-testing",
+          "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, a…"
+        },
+        {
+          "name": "wiki-ingest",
+          "description": "Ingest a file from ~/brain/raw/ into the wiki. Extract key concepts and entities, create or update pages in ~/brain/wiki/pages/, add cross-references, append to log.md. Use when th…"
+        },
+        {
+          "name": "wiki-lint",
+          "description": "Health check on ~/brain/wiki/. Find orphan pages, broken cross-reference links, stale last_updated dates, missing frontmatter fields, concepts mentioned repeatedly without a dedica…"
+        },
+        {
+          "name": "wiki-query",
+          "description": "Answer a question strictly from the user's brain at ~/brain/wiki/. Never answer from training memory on topics the wiki covers. Always cite the page used. Use when the user says \"/…"
+        },
+        {
+          "name": "wiki-save",
+          "description": "Persist a synthesized answer (from /brain-query, /wiki-query, or mid-conversation) as a new wiki page at ~/brain/wiki/pages/. Writes frontmatter (title, last_updated, tags), requir…"
+        },
+        {
+          "name": "xlsx",
+          "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreadsheets (.xls…"
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "label": "Custom agents: poller (haiku-pinned watcher), scripted-runner (sonnet-pinned executor)",
+      "payload": [
+        "claude/agents/"
+      ],
+      "target": "~/.claude/agents/",
+      "default": true
+    },
+    {
+      "id": "commands",
+      "label": "Slash commands: /clipboard, /council",
+      "payload": [
+        "claude/commands/"
+      ],
+      "target": "~/.claude/commands/",
+      "default": true
+    },
+    {
+      "id": "hook-scripts",
+      "label": "Hook scripts: malware guards (git push / npm install / git pull) + PR babysitter",
+      "payload": [
+        "claude/scripts/"
+      ],
+      "target": "~/.claude/scripts/",
+      "default": true,
+      "requires": [
+        "bash",
+        "git",
+        "gh CLI (PR babysitter only)"
+      ],
+      "notes": "Wired up by hooks in settings.json. On Windows these need Git Bash; verify `bash` resolves in the hook environment."
+    },
+    {
+      "id": "statusline",
+      "label": "Custom statusline (statusline-custom.sh + claude-code-statusline package v2.24.0)",
+      "payload": [
+        "claude/statusline-custom.sh",
+        "claude/statusline.sh",
+        "claude/statusline/"
+      ],
+      "target": "~/.claude/",
+      "default": true,
+      "requires": [
+        "bash",
+        "jq"
+      ],
+      "notes": "settings.json statusLine points at ~/.claude/statusline-custom.sh. Bash-based — Git Bash/WSL on Windows."
+    },
+    {
+      "id": "plugins",
+      "label": "Plugins (8): superpowers, context7, slack, swift-lsp, coderabbit, claude-md-management, imessage, caveman",
+      "payload": [],
+      "default": true,
+      "install": [
+        "claude plugin marketplace add JuliusBrussee/caveman",
+        "then inside Claude Code: /plugin install caveman@caveman",
+        "/plugin install superpowers@claude-plugins-official",
+        "/plugin install context7@claude-plugins-official",
+        "/plugin install slack@claude-plugins-official",
+        "/plugin install swift-lsp@claude-plugins-official",
+        "/plugin install coderabbit@claude-plugins-official",
+        "/plugin install claude-md-management@claude-plugins-official",
+        "/plugin install imessage@claude-plugins-official"
+      ],
+      "notes": "enabledPlugins + extraKnownMarketplaces are already in settings.json; installs must still run. imessage + swift-lsp are macOS-relevant only — skip on Linux/Windows. slack/coderabbit/context7 auth on first use."
+    },
+    {
+      "id": "mcp-servers",
+      "label": "User-scope MCP servers: brain-fs, excalidraw, monday, CompAI, gmessages",
+      "payload": [
+        "mcp/mcp-servers.json"
+      ],
+      "default": false,
+      "sub_selectable": true,
+      "notes": "Each has prereqs and/or secrets — see mcp/mcp-servers.json _prereq fields and INSTALL_AGENT.md. CompAI needs an API key from the user. brain-fs/gmessages depend on local systems not in this repo."
+    },
+    {
+      "id": "external-tools",
+      "label": "External CLI tools: agent-browser, carbontype, mcp_excalidraw build",
+      "payload": [
+        "external-deps.md"
+      ],
+      "default": false,
+      "notes": "agent-browser v0.27.0 (brew/npm), carbontype (github.com/HAR5HA-7663/carbontype), mcp_excalidraw (github.com/yctimlin/mcp_excalidraw). See external-deps.md."
+    },
+    {
+      "id": "brain-system",
+      "label": "Personal brain (~/brain) — NOT in this repo",
+      "payload": [],
+      "default": false,
+      "notes": "Private data; user must copy ~/brain from the old machine themselves (AirDrop/rsync/drive). Until then: SessionStart hook, brain-fs MCP, and brain/wiki skills will no-op or error — installer should skip or comment those out if brain is absent."
+    }
+  ]
+}
