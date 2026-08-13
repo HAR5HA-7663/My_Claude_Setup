@@ -40,7 +40,10 @@ mkdir "$LOCKDIR" 2>/dev/null || { echo "already babysitting $REPO#$PR"; exit 0; 
 trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
 
 # BeaverTail IOC signature — refuse to push if a merge drags one in.
-IOC="global\['\!'\]|_\$_1e42|node -e global|trongrid\.io|aptoslabs\.com|bsc-dataseed|eth_getTransactionByHash"
+# The last literal is split ("a""b" concatenates in shell, value is unchanged) so this
+# file does not match the push guard's own -F scan for it — same self-match defanging
+# git-push-malware-guard.sh applies to its pattern list. Do not rejoin it.
+IOC="global\['\!'\]|_\$_1e42|node -e global|trongrid\.io|aptoslabs\.com|bsc-dataseed|eth_getTransaction""ByHash"
 
 notify() {
   local tag="$1"; shift; local msg="$*"
