@@ -22,12 +22,12 @@ max 4 options per question, so split across questions like this (or equivalent):
 - **Question 1 — Core** (all default ON):
   - Core settings (model, hooks wiring, statusline ref, permissions, env)
   - Global CLAUDE.md + writing style guide
-  - Skills (34)
+  - Personal skills (44) — *sub-selected in Phase 1b, never bulk-installed*
   - Agents + slash commands
 - **Question 2 — Tooling** (default ON):
   - Hook scripts (malware guards + PR babysitter)
   - Custom statusline
-  - Plugins (8)
+  - Plugins (8, bringing 30 more skills) — *sub-selected in Phase 1b*
 - **Question 3 — Integrations** (default OFF, each has prereqs/secrets):
   - MCP servers (then sub-select which of the 5)
   - External CLI tools (agent-browser, carbontype, mcp_excalidraw)
@@ -35,6 +35,38 @@ max 4 options per question, so split across questions like this (or equivalent):
 
 If `AskUserQuestion` is unavailable in your harness, print a numbered checklist and have
 the user reply with the numbers to install. **Never install anything not selected.**
+
+## Phase 1b — Ask WHICH SKILLS (REQUIRED, never skip, never bulk-install)
+
+Selecting "skills" in Phase 1 does **not** mean copy all 44. Selecting "plugins" does
+**not** mean install all 8. Skills are the most context-expensive thing in this repo —
+every installed skill's name + description is loaded into every session — so an
+unwanted skill is a permanent tax, not a harmless extra.
+
+Read the skill catalog from `manifest.json` (`components[id=skills].items` for the
+personal ones, `components[id=plugins].catalog` for the plugin-provided ones; the README
+has the same lists grouped for humans). Then:
+
+1. **Present the personal skills grouped by theme** (brain/wiki, orchestration, design,
+   GSAP, documents, testing, personal-to-Harsha) with a one-line description each, and ask
+   which groups or individual skills the user wants. Multi-select, nothing pre-checked
+   except what they clearly need.
+2. **Present the plugins by what skills each one brings** — the user is choosing skills,
+   not plugin names. E.g. "superpowers brings 14 process skills (brainstorming, TDD,
+   systematic-debugging, code-review flow…) and injects an always-invoke-a-skill rule into
+   every session — want it?" Install only the plugins whose skills they said yes to.
+3. **Call out the ones with hard dependencies before they pick:**
+   - `brain-query`, `brain-status`, `wiki-*` (6) are dead weight without `~/brain`, which
+     is NOT in this repo. If the user isn't restoring the brain, recommend skipping all 6.
+   - `job-applicator`, `job-ranker` contain Harsha's personal résumé/application data.
+     Only install if the new machine is his.
+   - The 8 `gsap-*` skills only matter to someone writing GSAP animations — all-or-nothing.
+   - `agent-browser` is not in this repo at all (see the `skills` section below).
+   - `imessage` and `swift-lsp` plugins are macOS-only — auto-deselect elsewhere and say so.
+4. **Record the selection** and use it in Phase 2 for both the file copy and the
+   `settings.local.json` / `enabledPlugins` cleanup.
+
+Never copy `claude/skills/` wholesale "to save a round trip." Asking is the point.
 
 After selection, resolve dependencies and tell the user about consequences, e.g.:
 - Core settings hooks reference `claude/scripts/*` → if hook-scripts NOT selected, strip those hook entries from the settings you install.
@@ -64,10 +96,21 @@ all three OSes).
 3. If the brain is not being restored, tell the user the "Personal Brain" section will be inert until `~/brain` exists (it's safe to leave in place).
 
 ### skills
-Copy selected skill folders from `claude/skills/` → `~/.claude/skills/`. All are
-plain-markdown skill dirs; no build step. Platform notes: `agent-browser` skill needs the
-agent-browser CLI (external-tools component); `job-applicator` contains Harsha's personal
-application data — confirm the new machine is his before copying.
+Copy **only the skill folders the user picked in Phase 1b** from `claude/skills/` →
+`~/.claude/skills/`. All are plain-markdown skill dirs; no build step, no dependencies
+between them — each folder stands alone.
+
+- Skipping the brain? Then do not copy `brain-query`, `brain-status`, `wiki-ingest`,
+  `wiki-lint`, `wiki-query`, `wiki-save` — they will error on every invocation.
+- `job-applicator` / `job-ranker` hold Harsha's personal application data — confirm the
+  new machine is his before copying.
+- `agent-browser` is **not in this repo**. The agent-browser CLI installs its own skill at
+  `~/.agents/skills/agent-browser` and symlinks it into `~/.claude/skills/`. If the user
+  wants it, install the CLI (external-tools) — never hand-create that symlink.
+- After copying, prune `~/.claude/settings.local.json` so it only references skills that
+  actually landed.
+
+Report back exactly which skills were installed and which were skipped.
 
 ### agents
 Copy `claude/agents/*.md` → `~/.claude/agents/`. These pin models (haiku/sonnet) — no other setup.
@@ -86,16 +129,29 @@ Copy `claude/commands/*.md` → `~/.claude/commands/`.
 3. Verify: `echo '{}' | bash ~/.claude/statusline-custom.sh` should print a statusline, not errors.
 
 ### plugins
+Install **only the plugins whose skills the user asked for in Phase 1b.** Each plugin
+brings its own skills into every session; installing one the user doesn't want is the same
+mistake as copying a skill they didn't want. Full per-plugin skill lists are in
+`manifest.json` → `components[id=plugins].catalog`, and in the README table.
+
 Run in a Claude Code session (or via `claude` CLI where supported):
-1. `claude plugin marketplace add JuliusBrussee/caveman`
-2. `/plugin install caveman@caveman`
-3. `/plugin install superpowers@claude-plugins-official`
-4. `/plugin install context7@claude-plugins-official`
-5. `/plugin install slack@claude-plugins-official`
-6. `/plugin install coderabbit@claude-plugins-official`
-7. `/plugin install claude-md-management@claude-plugins-official`
-8. macOS only: `/plugin install swift-lsp@claude-plugins-official` and `/plugin install imessage@claude-plugins-official`
-Slack/CodeRabbit/Context7 will prompt their own auth on first use — let them.
+
+| Plugin | Command | Brings |
+|---|---|---|
+| caveman | `claude plugin marketplace add JuliusBrussee/caveman` then `/plugin install caveman@caveman` | 4 skills (compressed-output modes) |
+| superpowers | `/plugin install superpowers@claude-plugins-official` | 14 process skills **+ an always-invoke-a-skill rule in every session** — say this out loud before installing |
+| slack | `/plugin install slack@claude-plugins-official` | 7 skills + 5 slash commands |
+| coderabbit | `/plugin install coderabbit@claude-plugins-official` | 2 skills + `/coderabbit-review` |
+| claude-md-management | `/plugin install claude-md-management@claude-plugins-official` | 1 skill + `/revise-claude-md` |
+| context7 | `/plugin install context7@claude-plugins-official` | 0 skills — an MCP server for live library docs |
+| imessage *(macOS)* | `/plugin install imessage@claude-plugins-official` | 2 skills |
+| swift-lsp *(macOS)* | `/plugin install swift-lsp@claude-plugins-official` | 0 skills — Swift LSP integration |
+
+Then **strip `enabledPlugins` and `extraKnownMarketplaces` entries in the installed
+`settings.json` for every plugin the user declined** — leaving them in makes Claude Code
+complain about plugins that were never installed.
+
+Slack / CodeRabbit / Context7 prompt for their own auth on first use — let them.
 
 ### mcp-servers
 For each server the user sub-selected, read its `_prereq` in `mcp/mcp-servers.json`,
@@ -119,7 +175,9 @@ offer systemd user unit / Task Scheduler as replacements if asked.
 Run through this checklist and report results honestly (don't claim success without checking):
 1. `claude --version` starts; new session shows dark fullscreen TUI and the custom statusline.
 2. `/plugins` lists the selected plugins; `/hooks` (or settings inspection) shows the installed hooks.
-3. Skills appear in the skill list; `/council` and `/clipboard` resolve.
+3. The skill list shows **exactly** the skills the user selected — no more. If skills the
+   user declined are showing up, find where they came from (a plugin they didn't ask for,
+   or a bulk copy) and remove them. `/council` and `/clipboard` resolve.
 4. If hooks installed: `git push` in a scratch repo triggers the malware-guard status message.
 5. If MCP servers installed: `/mcp` shows them connected (monday will ask for OAuth — expected).
 6. If brain restored: new session auto-loads the brain context via the SessionStart hook.

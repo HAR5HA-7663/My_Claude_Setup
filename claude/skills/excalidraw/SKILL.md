@@ -7,6 +7,14 @@ description: Generate architecture diagrams on a live Excalidraw canvas when the
 
 Create diagrams on a **live Excalidraw canvas** using MCP tools. The canvas runs in a browser and updates in real time.
 
+> **⚠️ Before you draw anything that explains a system** — services, trust
+> boundaries, request flows, data stores, "how X works" for a team — the
+> [House Style](#house-style-system--architecture-diagrams-mandatory) section
+> below is **mandatory**, not optional, and overrides the generic defaults in
+> this file (including `roughness: 0`). Read it and
+> [references/system-diagram-style.md](references/system-diagram-style.md)
+> before laying out the first box.
+
 ---
 
 ## Mental Model
@@ -200,6 +208,8 @@ Check for issues requiring visual judgment:
 | **Text too small** | Labels hard to read | Increase to 16px minimum |
 | **Title missing** | No diagram title visible | Add text element at y = top_element_y - 60 |
 | **Diagram off-center** | Content clustered in one corner | `set_viewport({ scrollToContent: true })` |
+| **Text clipped by its box** | A sentence stops at the box border mid-word | Widen the box or break the line — see House Style "Text must fit" |
+| **House Style items missing** | System diagram with no legend, no numbered path panels, or no thesis banner | Add them — mandatory for system/architecture diagrams |
 
 **6d. Fix and re-check**
 
@@ -550,6 +560,92 @@ Place a gray-background rectangle (top-right, `x: 460`) with 3-4 text items expl
 
 ---
 
+## House Style: System & Architecture Diagrams (MANDATORY)
+
+Applies whenever the diagram explains **a system to other people** — architecture,
+request flow, trust boundaries, "how X works" for product/QA/engineering. It does
+NOT apply to throwaway sketches or dense parameter-threading traces (those keep
+`roughness: 0` and the Data Flow pattern above).
+
+Full copy-paste spec, exact coordinates, cylinder recipe and pre-flight checklist:
+**[references/system-diagram-style.md](references/system-diagram-style.md)** — read it
+before laying out.
+
+### The 12 rules
+
+1. **Ship two boards, not one.** An **explainer** board (concept strip →
+   lifecycle strip → "so what" strip) for product and QA, and a **system**
+   board (actors → trust boundaries → compute → data) for engineers. One
+   audience per board; neither board serves both.
+
+2. **Fixed anatomy, top to bottom.** Title (hand-drawn, 42px) + one-line
+   subtitle (gray, 17px) → content → bottom row of `LEGEND | READ PATH |
+   WRITE PATH` panels → full-width thesis banner. Never omit the bottom row.
+
+3. **Trust boundaries are dashed, transparent, labelled outside.**
+   `strokeStyle: "dashed"`, `backgroundColor: "transparent"`,
+   `roundness: {type: 3}`. The label sits **above** the frame's top edge
+   (`y = frame.y - 34`), in the frame's stroke color, hand-drawn font 20px.
+   A filled zone is a bug — it drowns its children.
+
+4. **Shape = kind.** Rounded rect = service/middleware. Cylinder (3 elements:
+   ellipse + rect + ellipse) = data store or cache. Diamond = network edge.
+   Stick figure = human actor. Dashed frame = trust boundary. Never reuse a
+   shape for a second meaning in the same board.
+
+5. **Arrow grammar, declared then obeyed.** solid `#1e1e1e` = request ·
+   solid `#2f9e44` = data returned · solid `#9c36b5` = admin/write path ·
+   dotted `#0c8599` = cache read · dashed `#e03131` = async / invalidate /
+   deny. Arrow labels are 12px in the arrow's own color (`read`, `on miss`,
+   `deny`, `publish`, `clear`).
+
+6. **Number the paths and badge the canvas.** Drop 34×34 amber badges
+   (`#ffec99` / `#f08c00`) on the flow — digits ①..⑧ for the read path,
+   letters Ⓐ..Ⓓ for the write path — and mirror each one as a row in the
+   matching bottom panel. Badge-to-row pairing is what lets a reader teach
+   themselves the system without a call.
+
+7. **The legend demonstrates, it does not describe.** Each legend row is
+   rendered in the style it names: the cyan row *is* cyan, the dashed-red row
+   *is* dashed red.
+
+8. **Fonts carry meaning.** `fontFamily: 1` (hand-drawn) for the board title
+   and zone labels only. `2` (normal) for every box label and body sentence.
+   `3` (code) for legend rows and numbered path lists so their columns align.
+
+9. **`roughness: 1` on every shape.** The sketch look is deliberate: it reads
+   as "a human drew this to explain something", which is how it lands in a
+   review thread. This overrides the `roughness: 0` default elsewhere in this
+   file.
+
+10. **One-sentence thesis banner, full width, at the bottom, in red.**
+    e.g. *"The browser hides. The API decides. Postgres holds the truth."*
+    If you cannot write that sentence, you do not understand the system well
+    enough to draw it yet — go read more code first.
+
+11. **Say what is NOT enforced.** Any rule that is shadow-mode, feature-flagged,
+    planned, or unimplemented must be labelled as such on the diagram
+    ("currently shadow-only unless enforcement is explicitly enabled"). A
+    diagram that shows only the intended design, with no marker for the parts
+    that are not live, reads as a claim that they are live. That is the single
+    most expensive mistake this format prevents.
+
+12. **Boxes are questions, not component names.** On the explainer board, head
+    each box with what the reader wants to know ("1. Your level",
+    "2. Your permissions", "3. Your job title", "Who may manage whom",
+    "The security rule") — never with a class or table name.
+
+### Text must fit — the #1 defect
+
+Standalone `text` elements do **not** wrap and do **not** clip to a parent
+rectangle: they simply run past its border and read as a truncated sentence.
+Before creating any text laid over a box, check
+`chars × fontSize × 0.6 ≤ box_width − 40`. If it fails, widen the box, split
+the line with `\n`, or shorten the copy. Verify in the screenshot at the
+zoom the reader will use — clipping at 100% is invisible in a thumbnail.
+
+---
+
 ## Common Mistakes and Fixes
 
 | Mistake | Fix |
@@ -568,6 +664,10 @@ Place a gray-background rectangle (top-right, `x: 460`) with 3-4 text items expl
 | Self-critique runs >2 rounds | Stop and present. List remaining issues for user |
 | Fixed layout but broke arrows | Screenshot after moving shapes to verify bindings. If broken, restore snapshot |
 | Self-critique made things worse | Restore snapshot with `restore_snapshot()` and present pre-critique version |
+| Sentence runs past its box edge and reads truncated | Standalone text does not wrap or clip. Check `chars × fontSize × 0.6 ≤ box_width − 40`; widen the box or break with `\n` |
+| Zone label collides with the frame border or a child shape | Move the label above the frame: `y = frame.y - 34`. Never place it inside the frame |
+| System diagram has no legend / no numbered path / no thesis line | Missing the mandatory bottom row. See House Style rules 2, 6, 10 |
+| Diagram shows planned behavior as if it were live | Label shadow-mode / flagged / unbuilt paths explicitly. See House Style rule 11 |
 
 ---
 
