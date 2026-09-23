@@ -22,7 +22,7 @@ max 4 options per question, so split across questions like this (or equivalent):
 - **Question 1 — Core** (all default ON):
   - Core settings (model, hooks wiring, statusline ref, permissions, env)
   - Global CLAUDE.md + writing style guide
-  - Personal skills (44) — *sub-selected in Phase 1b, never bulk-installed*
+  - Personal skills (28) — *sub-selected in Phase 1b, never bulk-installed*
   - Agents + slash commands
 - **Question 2 — Tooling** (default ON):
   - Hook + automation scripts (malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard)
@@ -40,7 +40,7 @@ the user reply with the numbers to install. **Never install anything not selecte
 
 ## Phase 1b — Ask WHICH SKILLS (REQUIRED, never skip, never bulk-install)
 
-Selecting "skills" in Phase 1 does **not** mean copy all 44. Selecting "plugins" does
+Selecting "skills" in Phase 1 does **not** mean copy all 28. Selecting "plugins" does
 **not** mean install all 8. Skills are the most context-expensive thing in this repo —
 every installed skill's name + description is loaded into every session — so an
 unwanted skill is a permanent tax, not a harmless extra.

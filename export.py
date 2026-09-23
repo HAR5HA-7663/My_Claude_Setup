@@ -56,7 +56,9 @@ def say(msg: str) -> None:
 
 def rsync(src: Path, dst: Path, excludes: list[str], delete: bool = True) -> None:
     dst.mkdir(parents=True, exist_ok=True)
-    cmd = ["rsync", "-a", "--no-links", "--no-perms", "--no-owner", "--no-group"] + (["--delete"] if delete else [])
+    # --delete-excluded: the repo is a mirror, so anything now excluded (a skill switched off,
+    # a backup file) disappears from it too instead of lingering from an earlier export.
+    cmd = ["rsync", "-a", "--no-links", "--no-perms", "--no-owner", "--no-group"] + (["--delete", "--delete-excluded"] if delete else [])
     for e in excludes:
         cmd += ["--exclude", e]
     cmd += [f"{src}/", f"{dst}/"]
@@ -87,16 +89,34 @@ def short(s: str, n: int = 170) -> str:
 
 
 # ---------------------------------------------------------------- copy steps
+def disabled_skills() -> set[str]:
+    """Skills turned off with skillOverrides (user or local scope) are not part of the setup:
+    the folders stay on disk but are never exported, and their override entries are dropped."""
+    off: set[str] = set()
+    for name in ("settings.json", "settings.local.json"):
+        src = C / name
+        if src.exists():
+            for k, v in json.loads(src.read_text()).get("skillOverrides", {}).items():
+                if v == "off" and (C / "skills" / k).is_dir():
+                    off.add(k)
+    return off
+
+
 def sync_claude_dir() -> None:
-    say("claude/CLAUDE.md, settings.json, settings.local.json")
+    off = disabled_skills()
+    say(f"claude/CLAUDE.md, settings.json, settings.local.json ({len(off)} disabled skills dropped)")
     shutil.copy2(C / "CLAUDE.md", REPO / "claude/CLAUDE.md")
     for name in ("settings.json", "settings.local.json"):
         src = C / name
         if src.exists():
             data = json.loads(src.read_text())
+            if "skillOverrides" in data:
+                data["skillOverrides"] = {k: v for k, v in data["skillOverrides"].items() if k not in off}
+                if not data["skillOverrides"]:
+                    del data["skillOverrides"]
             (REPO / "claude" / name).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     say("skills / agents / commands / scripts (rsync --delete)")
-    rsync(C / "skills", REPO / "claude/skills", SKILL_EXCLUDES)
+    rsync(C / "skills", REPO / "claude/skills", SKILL_EXCLUDES + sorted(off))
     rsync(C / "agents", REPO / "claude/agents", ["*.bak*", ".DS_Store"])
     rsync(C / "commands", REPO / "claude/commands", ["*.bak*", ".DS_Store"])
     rsync(C / "scripts", REPO / "claude/scripts", SCRIPT_EXCLUDES)
@@ -243,6 +263,7 @@ def build_manifest() -> None:
         skills.append({"name": sk.parent.name, "description": short(fm.get("description", ""))})
     catalog, markets = plugin_catalog()
     enabled_plugins = [c for c in catalog if c["enabled"]]
+    off = sorted(disabled_skills())
     scripts = sorted(p.name for p in (REPO / "claude/scripts").iterdir() if p.is_file())
     tools = sorted(p.name for p in (REPO / "bin").iterdir() if p.is_file())
     jobs = sorted(p.name for p in (REPO / "launchd").glob("*.plist"))
@@ -251,7 +272,8 @@ def build_manifest() -> None:
         comp("core-settings", payload=["claude/settings.json", "claude/settings.local.json"]),
         comp("global-claude-md", payload=["claude/CLAUDE.md", "extras/harsha-slack-writing-style.md"]),
         comp("skills", label=f"Personal skills ({len(skills)}) — copied from this repo into ~/.claude/skills/", payload=["claude/skills/"],
-             target="~/.claude/skills/", default=True, sub_selectable=True, items=skills),
+             target="~/.claude/skills/", default=True, sub_selectable=True, items=skills, not_exported=off,
+             notes="`not_exported` lists skills the owner turned off with skillOverrides on the source machine — they are not part of the setup and are not in this repo."),
         comp("agents", payload=["claude/agents/"]),
         comp("commands", payload=["claude/commands/"]),
         comp("hook-scripts", label=f"Hook + automation scripts ({len(scripts)}) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
@@ -285,6 +307,7 @@ def build_manifest() -> None:
         "components": components,
         "counts": {
             "personal_skills": len(skills),
+            "personal_skills_disabled_not_exported": len(off),
             "plugins": len(enabled_plugins),
             "plugin_skills": sum(len(c["skills"]) for c in enabled_plugins),
             "plugin_commands": sum(len(c["commands"]) for c in enabled_plugins),

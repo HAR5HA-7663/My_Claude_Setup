@@ -31,7 +31,7 @@
     },
     {
       "id": "skills",
-      "label": "Personal skills (44) — copied from this repo into ~/.claude/skills/",
+      "label": "Personal skills (28) — copied from this repo into ~/.claude/skills/",
       "payload": [
         "claude/skills/"
       ],
@@ -39,18 +39,6 @@
       "default": true,
       "sub_selectable": true,
       "items": [
-        {
-          "name": "algorithmic-art",
-          "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, a…"
-        },
-        {
-          "name": "auto-diagram",
-          "description": "Automatically analyze a codebase and generate an architecture diagram with zero configuration. Use when the user asks to \"diagram this repo\", \"visualize the architecture…"
-        },
-        {
-          "name": "banner-design",
-          "description": "Design banners for social media, ads, website heroes, creative assets, and print. Multiple art direction options with AI-generated visuals. Actions: design, create, gene…"
-        },
         {
           "name": "brain-query",
           "description": "Semantic two-tier retrieval over the personal brain at ~/brain/. Queries brain_wiki (synthesized pages) first, falls back to brain_raw (raw source chunks) if confidence …"
@@ -84,10 +72,6 @@
           "description": "Token architecture, component specifications, and slide generation. Three-layer tokens (primitive→semantic→component), CSS variables, spacing/typography scales, componen…"
         },
         {
-          "name": "doc-coauthoring",
-          "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or simil…"
-        },
-        {
           "name": "docx",
           "description": "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to wor…"
         },
@@ -98,42 +82,6 @@
         {
           "name": "frontend-design",
           "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, …"
-        },
-        {
-          "name": "gsap-core",
-          "description": "Official GSAP skill for the core API — gsap.to(), from(), fromTo(), easing, duration, stagger, defaults, gsap.matchMedia() (responsive, prefers-reduced-motion). Use when…"
-        },
-        {
-          "name": "gsap-frameworks",
-          "description": "Official GSAP skill for Vue, Svelte, and other non-React frameworks — lifecycle, scoping selectors, cleanup on unmount. Use when the user wants animation in Vue, Nuxt, S…"
-        },
-        {
-          "name": "gsap-performance",
-          "description": "Official GSAP skill for performance — prefer transforms, avoid layout thrashing, will-change, batching. Use when optimizing GSAP animations, reducing jank, or when the u…"
-        },
-        {
-          "name": "gsap-plugins",
-          "description": "Official GSAP skill for GSAP plugins — registration, ScrollToPlugin, ScrollSmoother, Flip, Draggable, Inertia, Observer, SplitText, ScrambleText, SVG and physics plugins…"
-        },
-        {
-          "name": "gsap-react",
-          "description": "Official GSAP skill for React — useGSAP hook, refs, gsap.context(), cleanup. Use when the user wants animation in React or Next.js, or asks about GSAP with React, useGSA…"
-        },
-        {
-          "name": "gsap-scrolltrigger",
-          "description": "Official GSAP skill for ScrollTrigger — scroll-linked animations, pinning, scrub, triggers. Use when building or recommending scroll-based animation, parallax, pinned se…"
-        },
-        {
-          "name": "gsap-timeline",
-          "description": "Official GSAP skill for timelines — gsap.timeline(), position parameter, nesting, playback. Use when sequencing animations, choreographing keyframes, or when the user as…"
-        },
-        {
-          "name": "gsap-utils",
-          "description": "Official GSAP skill for gsap.utils — clamp, mapRange, normalize, interpolate, random, snap, toArray, wrap, pipe. Use when the user asks about gsap.utils, clamp, mapRange…"
-        },
-        {
-          "name": "internal-comms",
-          "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to …"
         },
         {
           "name": "loopengg",
@@ -160,16 +108,8 @@
           "description": "Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a…"
         },
         {
-          "name": "pptx",
-          "description": "Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing co…"
-        },
-        {
           "name": "skill-creator",
           "description": "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities wit…"
-        },
-        {
-          "name": "slack-gif-creator",
-          "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated G…"
         },
         {
           "name": "slides",
@@ -210,13 +150,28 @@
         {
           "name": "wiki-save",
           "description": "Persist a synthesized answer (from /brain-query, /wiki-query, or mid-conversation) as a new wiki page at ~/brain/wiki/pages/. Writes frontmatter (title, last_updated, ta…"
-        },
-        {
-          "name": "xlsx",
-          "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When Claude needs to work with spreads…"
         }
       ],
-      "selection": "REQUIRED: sub-select. Show the user this list and copy ONLY the skills they pick. Never copy the whole folder without asking."
+      "selection": "REQUIRED: sub-select. Show the user this list and copy ONLY the skills they pick. Never copy the whole folder without asking.",
+      "not_exported": [
+        "algorithmic-art",
+        "auto-diagram",
+        "banner-design",
+        "doc-coauthoring",
+        "gsap-core",
+        "gsap-frameworks",
+        "gsap-performance",
+        "gsap-plugins",
+        "gsap-react",
+        "gsap-scrolltrigger",
+        "gsap-timeline",
+        "gsap-utils",
+        "internal-comms",
+        "pptx",
+        "slack-gif-creator",
+        "xlsx"
+      ],
+      "notes": "`not_exported` lists skills the owner turned off with skillOverrides on the source machine — they are not part of the setup and are not in this repo."
     },
     {
       "id": "agents",
@@ -858,7 +813,8 @@
     }
   ],
   "counts": {
-    "personal_skills": 44,
+    "personal_skills": 28,
+    "personal_skills_disabled_not_exported": 16,
     "plugins": 7,
     "plugin_skills": 73,
     "plugin_commands": 20,

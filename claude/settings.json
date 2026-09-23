@@ -22,24 +22,6 @@
     "defaultMode": "auto"
   },
   "model": "opus[1m]",
-  "skillOverrides": {
-    "internal-comms": "off",
-    "slack-gif-creator": "off",
-    "auto-diagram": "off",
-    "pptx": "off",
-    "xlsx": "off",
-    "doc-coauthoring": "off",
-    "algorithmic-art": "off",
-    "gsap-core": "off",
-    "gsap-timeline": "off",
-    "gsap-plugins": "off",
-    "gsap-frameworks": "off",
-    "gsap-performance": "off",
-    "gsap-utils": "off",
-    "gsap-react": "off",
-    "gsap-scrolltrigger": "off",
-    "banner-design": "off"
-  },
   "hooks": {
     "PreToolUse": [
       {

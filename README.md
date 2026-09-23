@@ -10,7 +10,7 @@ Full export of Harsha's Claude Code environment (first exported 2026-08-02; refr
 > **which skills they actually need** — both the personal skills in this repo and the
 > skills that arrive with each plugin. Install **only** what they pick.
 >
-> Nobody needs 44 personal skills + 73 plugin skills. Most of them are dead weight for a
+> Nobody needs 28 personal skills + 73 plugin skills. Most of them are dead weight for a
 > given person, and every installed skill costs context on every single session.
 >
 > Full procedure: [`INSTALL_AGENT.md`](INSTALL_AGENT.md). Machine-readable catalog:
@@ -35,7 +35,7 @@ Full export of Harsha's Claude Code environment (first exported 2026-08-02; refr
 | `claude/settings.json` | Model (`claude-fable-5[1m]`), effort `xhigh`, fullscreen TUI, dark theme, voice (hold mode), auto permission mode, hooks, statusline wiring, enabled plugins, env vars |
 | `claude/settings.local.json` | Skill visibility overrides |
 | `claude/CLAUDE.md` | Global instructions: personal brain rules, subagent model tiering, Jev decision layer, universal `~/.env`, agent-browser + `jab`/`hunch` default, writing style |
-| `claude/skills/` | **44 personal skills** — see the catalog below. Sub-selectable; do not bulk-copy. |
+| `claude/skills/` | **28 personal skills** — see the catalog below. Sub-selectable; do not bulk-copy. (16 more exist on the source machine but are switched off there, so they are not exported — listed in `manifest.json` → `components[id=skills].not_exported`.) |
 | `claude/agents/` | `poller` (haiku-pinned) and `scripted-runner` (sonnet-pinned) custom agents |
 | `claude/commands/` | `/clipboard`, `/council` slash commands |
 | `claude/scripts/` | Hook + automation scripts (17): malware guards + IOC sync + daily host sweep, PR babysitter with Jev risk pre-filter, Jev Bash risk gate, verify-report, morning/monday triage runners, mem-guard, TCC residue cleaner |
@@ -56,11 +56,11 @@ Know which bucket a skill is in before trying to install it.
 
 | Source | Where it lives | How to install |
 |---|---|---|
-| **1. Personal** (44) | `claude/skills/` in this repo | Copy the chosen folders → `~/.claude/skills/` |
+| **1. Personal** (28) | `claude/skills/` in this repo | Copy the chosen folders → `~/.claude/skills/` |
 | **2. Plugin-provided** (73) | Not in this repo — ships inside a plugin | `/plugin install <plugin>@<marketplace>` |
 | **3. CLI-provided** (1) | Not in this repo — ships with an external CLI | Install the CLI (see `external-deps.md`) |
 
-## 1. Personal skills (44) — in `claude/skills/`
+## 1. Personal skills (28) — in `claude/skills/`
 
 Ask the user which of these they want. Group headings are just for the conversation;
 each folder is independent.
@@ -71,14 +71,11 @@ each folder is independent.
 **Orchestration & meta (4)**
 `loopengg` (loop-engineering orchestration mode: decompose → fan out to model-tiered subagents → adversarially verify → report) · `council` (5-advisor adversarial decision panel) · `skill-creator` · `mcp-builder`
 
-**Design & visual (17)**
-`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `motion-design` · `brand` · `brand-guidelines` · `banner-design` · `canvas-design` · `algorithmic-art` · `theme-factory` · `slides` · `web-artifacts-builder` · `slack-gif-creator` · `excalidraw` · `auto-diagram`
+**Design & visual (13)**
+`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `motion-design` · `brand` · `brand-guidelines` · `canvas-design` · `theme-factory` · `slides` · `web-artifacts-builder` · `excalidraw`
 
-**GSAP animation (8)** — *only useful if the user writes GSAP animations; take all 8 or none.*
-`gsap-core` · `gsap-timeline` · `gsap-scrolltrigger` · `gsap-plugins` · `gsap-react` · `gsap-frameworks` · `gsap-utils` · `gsap-performance`
-
-**Documents & writing (6)**
-`docx` · `pptx` · `xlsx` · `pdf` · `doc-coauthoring` · `internal-comms`
+**Documents & writing (2)**
+`docx` · `pdf`
 
 **Testing (1)**
 `webapp-testing`
