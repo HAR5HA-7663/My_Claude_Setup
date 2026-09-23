@@ -1,0 +1,46 @@
+#!/bin/bash
+# jev-verify-report — cheap pre-check of a subagent/worker report before spending a real verifier.
+#
+#   jev-verify-report "<what the worker was asked to do>" < report.txt
+#   jev-verify-report --task "<task>" --file report.txt
+#
+# Prints JSON:
+#   {"verdict": "verify"|"accept"|"reject", "p_claims_done": .., "p_evidence": .., "p_unverified": ..,
+#    "p_scope_creep": .., "next_tier": "haiku"|"sonnet"|"opus", "reason": "..."}
+#
+#   accept  - claims are backed by shown evidence (test output, diff, URL, command output); still spot-check
+#   verify  - claims of success without evidence, or partial work -> spend the opus verifier
+#   reject  - the worker did not do the task (declined, went off-scope, or reports failure) -> re-dispatch
+# Fails open: if Jev is unavailable, prints {"verdict":"verify", ...} so nothing is accepted unchecked.
+set -uo pipefail
+command -v jev-ask >/dev/null 2>&1 || PATH="$HOME/.local/bin:$PATH"
+TASK=""; FILE=""
+while [ $# -gt 0 ]; do case "$1" in --task) TASK=$2; shift 2;; --file) FILE=$2; shift 2;; *) TASK=$1; shift;; esac; done
+REPORT=$( [ -n "$FILE" ] && cat "$FILE" || cat )
+[ -n "$REPORT" ] || { echo '{"verdict":"reject","reason":"empty report"}'; exit 0; }
+
+STATE="TASK the worker was given:
+${TASK:-(not provided)}
+
+WORKER REPORT:
+$(printf '%s' "$REPORT" | head -c 14000)"
+
+ANS=$(printf '%s' "$STATE" | jev-ask --purpose verify-report --deadline 2500 \
+  --noul claims_done "Does the WORKER REPORT claim that the TASK was completed successfully?" \
+  --noul evidence "Does the WORKER REPORT include concrete evidence of the result: pasted test or command output, a diff or file contents, a URL, numbers that were measured, or a description of a check that was actually run?" \
+  --noul unverified "Does the WORKER REPORT state that something works, passes, is fixed or is deployed without showing how that was checked?" \
+  --noul scope_creep "Did the worker do something different from, or well beyond, the TASK it was given?" \
+  --noul blocked "Does the WORKER REPORT say the worker could not finish, was blocked, or needs a decision?" \
+  --choice next_tier "If a follow-up step is needed, which model tier does it need?" haiku="mechanical: run a command, move a file, poll, re-format" sonnet="scripted single step with clear instructions" opus="judgement: review, root-cause, verify claims, decide" 2>/dev/null) || ANS=""
+[ -n "$ANS" ] || { echo '{"verdict":"verify","reason":"jev unavailable — do not accept unchecked","next_tier":"opus"}'; exit 0; }
+
+printf '%s' "$ANS" | jq -c '
+  def p(k): (.[k].noul // 0);
+  {p_claims_done: p("claims_done"), p_evidence: p("evidence"), p_unverified: p("unverified"),
+   p_scope_creep: p("scope_creep"), p_blocked: p("blocked"), next_tier: (.next_tier.choice // "opus")}
+  | .verdict = (if .p_blocked >= 0.6 or .p_scope_creep >= 0.7 then "reject"
+               elif .p_claims_done >= 0.6 and .p_evidence >= 0.7 and .p_unverified < 0.4 then "accept"
+               else "verify" end)
+  | .reason = (if .verdict == "reject" then (if .p_blocked >= 0.6 then "worker reports it is blocked or unfinished" else "worker went off-scope" end)
+              elif .verdict == "accept" then "claims are backed by shown evidence — spot-check, do not skip"
+              else "success is claimed without enough evidence — run the verifier" end)'

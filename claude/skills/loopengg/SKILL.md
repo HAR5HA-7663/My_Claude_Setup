@@ -52,6 +52,18 @@ Agent-vs-Workflow choice and the standard fleet shapes.
 independent worker tries to refute it. Bound it — 1-2 skeptics per finding, not
 5. Never relay a worker's self-report as fact.
 
+Before spending an opus skeptic, run the ~300 ms Jev pre-check on the report:
+```
+printf '%s' "<worker report>" | jev-verify-report --task "<what it was asked to do>"
+```
+It returns `verdict` **reject** (blocked / off-scope → re-dispatch, no verifier
+needed), **verify** (success claimed without shown evidence → the skeptic goes
+here), or **accept** (claims backed by pasted output/diff/URL → one quick
+spot-check instead of a full adversarial pass), plus `next_tier` for the
+follow-up. It fails open to `verify`. It never replaces the skeptic on anything
+that touches prod, billing, auth or data; it only decides where the skeptic's
+time goes first.
+
 **5. Synthesize and report.** One consolidated message: what landed, what was
 verified and how, what is blocked, and any decision for the user. Never paste
 raw subagent transcripts.

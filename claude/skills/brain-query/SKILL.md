@@ -19,7 +19,9 @@ Two-tier retrieval + synthesis over `~/brain/`.
    - `layer` — `"brain_wiki"` or `"brain_raw"` — which collection the top result came from.
    - `provider`, `threshold` (wiki-vs-raw gate), `fallback_floor` (in-brain cutoff) — all resolved from `scripts/config.py`, for reporting.
    - `top_score` — cosine similarity of the best result (0–1).
-   - `results[]` — ordered by score. Each has `source_rel`, `heading_path`, `chunk_idx`, `text` (the chunk preview, possibly truncated to the token budget).
+   - `verdict_source` — `"cosine"` or `"jev"`. When the cosine score is ambiguous (inside `config.RERANK_BAND`), the script asks the Jev decision model whether each passage actually answers the question and lets that decide. Still authoritative either way — do not second-guess it. `rerank` and `timings_ms` are diagnostics.
+   - `confidence` — `"high"`, `"low"`, or `"unchecked"` (Jev unavailable). **`"low"` means the pages are on-topic but no single passage answers the question**: read the full pages in step 3 before answering, and if they genuinely don't answer it, say so and fall back to step 7's training-data label rather than stretching the sources.
+   - `results[]` — best first (by `p_answers`, Jev's probability that the passage answers the question, when present; otherwise by cosine `score`). Each has `layer`, `source_rel`, `heading_path`, `chunk_idx`, `text` (the chunk preview, possibly truncated to the token budget). Passages Jev rated irrelevant are already dropped, so every result is worth reading.
    - `wiki_top_if_fallback` — present only when `layer == "brain_raw"`; the nearest wiki misses, for transparency.
 
 3. For each high-scoring result (top 2–3), Read the cited file (`~/brain/<source_rel>`) to get the full page — the preview is truncated to fit the token budget.

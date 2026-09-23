@@ -55,3 +55,32 @@ normal workflow. Scopes on the source machine: gist, read:audit_log, read:org, r
 
 Real Chrome is used by agent-browser (headed). Install per OS and fix
 `AGENT_BROWSER_EXECUTABLE_PATH` in settings.json accordingly.
+
+## TypeSafe Jev key (decision layer)
+
+Hosted decision model used by the Jev hooks, triage skills, `jab`/`hunch` and the jev-compact plugin
+(https://typesafe.ai — API key from the TypeSafe dashboard, ~$0.04 per million input tokens).
+Goes in `~/.env` under `[personal]` as `TYPESAFE_API_KEY=`; nothing else reads it. Everything
+degrades to the pre-Jev behaviour without it.
+
+## uv + hunch (Jev-driven browser flows)
+
+- `uv`: https://docs.astral.sh/uv/ (`brew install uv` / `pipx install uv` / the installer script).
+- `hunch`: `uv tool install hunch-browser` (or `git clone https://github.com/HAR5HA-7663/hunch` and `uv tool install .`).
+  `bin/jev-step` wraps it; `bin/jab` calls Jev directly and only needs agent-browser + python3.
+
+## jev-compact (compaction plugin)
+
+`git clone https://github.com/HAR5HA-7663/jev-compact` — installed as a local marketplace plugin, see
+INSTALL_AGENT.md → plugins. Needs Claude Code ≥ 2.1.274 with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`
+(the `shell/` launcher sets it).
+
+## python3 + jq
+
+The triage scripts, `env-sync`, `jev-ask`, `jab`, `sync-malware-iocs.py` and `export.py` are Python 3.11+
+(stdlib only). The statusline, guards and the brain hooks need `jq`.
+
+## ~/.env (universal env file)
+
+Not a tool but a prerequisite: mode 600, `[owner]` blocks, read only through `bin/with-env`.
+`bin/env-sync` fills the mirrored `[owner/path]` blocks from project `.env` files on the new machine.

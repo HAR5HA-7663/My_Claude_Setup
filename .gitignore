@@ -6,3 +6,6 @@ node_modules/
 *.skill
 *.bak
 tmpclaude-*
+*.log
+.tcc-clean-last-version
+*.pre-ioc-sync

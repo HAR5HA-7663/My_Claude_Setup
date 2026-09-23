@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""env-sync — mirror every project .env on this machine into the universal ~/.env.
+
+Project files stay where they are and stay the source of truth (apps read them
+directly). This copies each one into an [owner/path] block inside that owner's
+section of ~/.env, so `with-env --scope bevri --only NAME <cmd>` can reach it.
+
+  env-sync             scan, rewrite ~/.env, print a report
+  env-sync --dry-run   report only, write nothing
+
+Layout written, per owner (personal, bevri, teli, fsbo, other, then any others):
+  [owner]            hand-edited block — never touched, keys and comments kept
+  [owner/repo...]    mirrored project blocks — regenerated from scratch each run
+  [owner/tmp/...]    scratch copies (QA rigs, demos, worktrees) — listed last
+
+A block counts as mirrored when it carries a `# source:` line; everything else
+is yours. Values are never printed. The previous file is kept as ~/.env.bak.
+"""
+
+import hashlib
+import os
+import re
+import sys
+from datetime import date
+from pathlib import Path
+
+HOME = Path.home()
+ENV_FILE = Path(os.environ.get("UNIVERSAL_ENV_FILE", HOME / ".env"))
+
+# First match wins: (directory, owner, path the block name is made relative to).
+OWNERS = [
+    (HOME / "Desktop/Bevri", "bevri", HOME / "Desktop/Bevri"),
+    (HOME / "Desktop/teli", "teli", HOME / "Desktop/teli"),
+    (HOME / "Desktop/fsbo", "fsbo", HOME / "Desktop/fsbo"),
+    (HOME / "Desktop/Personal", "personal", HOME / "Desktop/Personal"),
+    (HOME / "brain", "personal", HOME),
+    (HOME / "tools", "personal", HOME),
+    (HOME / "Desktop/Archive", "other", HOME / "Desktop/Archive"),
+]
+FALLBACK_OWNER = "other"
+OWNER_ORDER = ["personal", "bevri", "teli", "fsbo", "other"]
+
+PRUNE = {
+    "node_modules", "Library", ".Trash", ".git", ".venv", "venv", "site-packages",
+    ".next", "dist", "build", ".cache", ".npm", ".nvm", ".pyenv", ".cargo", ".rustup",
+    ".orbstack", "OrbStack", ".docker", "Pictures", "Music", "Movies", ".chroma",
+    "__pycache__", ".terraform", "vendor", "Pods",
+}
+SKIP_SUFFIX = re.compile(r"\.(example|sample|template|tpl|dist|defaults|bak|tmp)$", re.I)
+# Copies that only exist because of a worktree / scratch checkout. Keep in step with with-env.
+SCRATCH = re.compile(r"/(tmp|worktrees|\.worktrees)/")
+
+LINE = re.compile(
+    r"""^[ \t]*(?:export[ \t]+)?([\w.-]+)[ \t]*=[ \t]*"""
+    r"""('(?:\\'|[^'])*'|"(?:\\"|[^"])*"|`(?:\\`|[^`])*`|[^\r\n]*)?[ \t]*(?:\#.*)?$""",
+    re.M,
+)
+VALID_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+HEADER = re.compile(r"^\s*\[([A-Za-z0-9_./@-]+)\]\s*$")
+# Lines this tool generates around blocks; dropped when the file is re-read.
+DECOR = re.compile(r"^# (=====|-----)|^# (Do not edit below|Last sync:)")
+
+PREAMBLE = """\
+# Universal env file — every key on this machine, grouped by who owns it.
+# Loaded ON DEMAND via `with-env` (with-env --help). Never sourced globally.
+#
+# Each owner section has:
+#   [owner]            yours — add company-wide keys here by hand
+#   [owner/repo]       mirrored from that project's .env by `env-sync`.
+#                      Don't edit these: change the project file, re-run env-sync.
+#
+#   with-env --scope bevri --only STRIPE_SECRET_KEY <cmd>
+# looks in [bevri] first, then every [bevri/...] block. If two blocks disagree on
+# the value it stops and asks for a more specific --scope.
+#
+# Format: NAME=value, one per line, no `export`. Need another owner? Add [name].
+# Mode must stay 600 (with-env refuses to run otherwise).
+"""
+
+
+def is_env_file(name):
+    if name == ".envrc" or SKIP_SUFFIX.search(name):
+        return False
+    return name == ".env" or name.startswith(".env.") or name.endswith(".env")
+
+
+def scan():
+    found = []
+    for root, dirs, files in os.walk(HOME):
+        dirs[:] = [d for d in dirs if d not in PRUNE]
+        for f in files:
+            p = Path(root) / f
+            if is_env_file(f) and p != ENV_FILE and p.is_file() and not p.is_symlink():
+                found.append(p)
+    return sorted(found)
+
+
+def parse(text):
+    """dotenv-compatible parse -> (ordered {name: value}, skipped names)."""
+    values, skipped = {}, []
+    for m in LINE.finditer(text):
+        name, raw = m.group(1), (m.group(2) or "").strip()
+        quote = raw[0] if raw[:1] in ("'", '"', "`") else ""
+        if quote and len(raw) >= 2 and raw[-1] == quote:
+            val = raw[1:-1]
+            if quote == '"':
+                val = val.replace("\\n", "\n").replace("\\r", "\r")
+        else:
+            val = re.sub(r"\s+#.*$", "", raw)
+        if not VALID_NAME.match(name):
+            skipped.append(name)
+            continue
+        values.pop(name, None)  # last assignment wins, keeps its position
+        values[name] = val
+    return values, skipped
+
+
+def block_name(path):
+    for base, owner, rel_to in OWNERS:
+        if base == path or base in path.parents:
+            rel = path.parent.relative_to(rel_to)
+            break
+    else:
+        owner, rel = FALLBACK_OWNER, path.parent.relative_to(HOME)
+    parts = list(rel.parts)
+    name = path.name
+    variant = ""
+    if name.startswith(".env."):
+        variant = "@" + name[len(".env."):]
+    elif name != ".env":  # something.env -> last path segment
+        parts.append(name[: -len(".env")])
+    block = "/".join([owner] + parts) + variant
+    block = re.sub(r"[^a-z0-9_./@-]", "-", block.lower())
+    return block if "/" in block else block + "/root"
+
+
+def encode(val):
+    """Render a value for the line-based, literal with-env format."""
+    flags = []
+    if "\n" in val or "\r" in val:
+        val = val.replace("\r", "").replace("\n", "\\n")
+        flags.append("multiline")
+    if "${" in val:
+        flags.append("has-${}")
+    if val != val.strip() or (len(val) >= 2 and val[0] == val[-1] and val[0] in "'\""):
+        val = '"' + val + '"'
+    return val, flags
+
+
+def fingerprint(values):
+    h = hashlib.sha256()
+    for k in sorted(values):
+        h.update(k.encode() + b"\0" + values[k].encode() + b"\0")
+    return h.hexdigest()[:10]
+
+
+def split_file(text):
+    """-> (preamble lines, [(name, body lines)] hand-edited blocks, {name: fp} mirrored)."""
+    preamble, blocks, cur = [], [], None
+    for line in text.splitlines():
+        m = HEADER.match(line)
+        if m:
+            cur = (m.group(1).lower(), [])
+            blocks.append(cur)
+        elif cur is None:
+            preamble.append(line)
+        else:
+            cur[1].append(line)
+    curated, mirrored = [], {}
+    for name, lines in blocks:
+        if any(l.startswith("# source: ") for l in lines):
+            mirrored[name] = next((l[6:].strip() for l in lines if l.startswith("# fp: ")), "")
+            continue
+        body = [l for l in lines if not DECOR.match(l)]
+        while body and not body[-1].strip():
+            body.pop()
+        while body and not body[0].strip():
+            body.pop(0)
+        curated.append((name, body))
+    preamble = [l for l in preamble if not DECOR.match(l)]
+    while preamble and not preamble[-1].strip():
+        preamble.pop()
+    return preamble, curated, mirrored
+
+
+def curated_pairs(text):
+    """Every hand-edited assignment as (block, line) — must survive a rewrite untouched."""
+    _, curated, _ = split_file(text)
+    return sorted((n, l.strip()) for n, body in curated for l in body
+                  if l.strip() and not l.lstrip().startswith("#"))
+
+
+def owner_of(block):
+    return block.split("/", 1)[0]
+
+
+def main():
+    args = sys.argv[1:]
+    if any(a in ("-h", "--help") for a in args):
+        print(__doc__)
+        return 0
+    dry = "--dry-run" in args
+    if not ENV_FILE.exists():
+        sys.exit(f"env-sync: {ENV_FILE} not found — create it first")
+
+    current = ENV_FILE.read_text()
+    preamble, curated, before = split_file(current)
+    if not preamble or preamble[0].startswith("# Universal env file"):
+        preamble = PREAMBLE.rstrip("\n").splitlines()  # ours unless the user replaced it
+
+    groups, empty = {}, []  # fingerprint -> {"values", "paths", "skipped"}
+    for path in scan():
+        try:
+            values, skipped = parse(path.read_text(errors="replace"))
+        except OSError as e:
+            print(f"  unreadable: {path} ({e.strerror})")
+            continue
+        if not values:
+            empty.append(path)
+            continue
+        g = groups.setdefault(fingerprint(values), {"values": values, "paths": [], "skipped": skipped})
+        g["paths"].append(path)
+
+    blocks, taken = [], {n for n, _ in curated}
+    for fp, g in sorted(groups.items(), key=lambda kv: str(kv[1]["paths"])):
+        g["paths"].sort(key=lambda p: (bool(SCRATCH.search(str(p))), len(str(p))))
+        name = block_name(g["paths"][0])
+        if name in taken:  # two different files mapping to one name, or a hand-made block
+            name = f"{name}-{fp[:4]}"
+        taken.add(name)
+        blocks.append((name, fp, g))
+    blocks.sort(key=lambda b: b[0])
+
+    owners = list(OWNER_ORDER)
+    for o in [owner_of(n) for n, _ in curated] + [owner_of(b[0]) for b in blocks]:
+        if o not in owners:
+            owners.append(o)
+
+    out = preamble + [""]
+    report = []
+    for owner in owners:
+        out += ["", f"# ===== {owner.upper()} " + "=" * max(4, 66 - len(owner)), ""]
+        mine = [(n, b) for n, b in curated if owner_of(n) == owner]
+        if not any(n == owner for n, _ in mine):
+            mine.insert(0, (owner, []))
+        for n, body in mine:
+            if n == owner and not body:
+                body = [f"# hand-added {owner} keys that don't belong to a single repo go here"]
+            out += [f"[{n}]"] + body + [""]
+        for scratch in (False, True):
+            chosen = [b for b in blocks if owner_of(b[0]) == owner
+                      and bool(SCRATCH.search("/" + b[0] + "/")) == scratch]
+            if not chosen:
+                continue
+            out += ["# ----- scratch copies: QA rigs, demos, worktrees -----" if scratch else
+                    "# ----- mirrored from project .env files by env-sync — edit the project file, not here -----",
+                    ""]
+            for name, fp, g in chosen:
+                out += [f"[{name}]", f"# source: {g['paths'][0]}"]
+                out += [f"# also:   {p}" for p in g["paths"][1:]]
+                out += [f"# fp: {fp}"]
+                notes = set()
+                for k, v in g["values"].items():
+                    enc, flags = encode(v)
+                    notes.update(flags)
+                    if "multiline" in flags:
+                        out.append("# multi-line in source: newlines stored as \\n — decode before use")
+                    out.append(f"{k}={enc}")
+                out.append("")
+                status = "new" if name not in before else ("same" if before[name] == fp else "CHANGED")
+                if g["skipped"]:
+                    notes.add(f"skipped {len(g['skipped'])} non-shell names")
+                report.append((status, len(g["values"]), name, g["paths"], sorted(notes)))
+    out += [f"# ===== last env-sync: {date.today().isoformat()} ====="]
+    new_text = "\n".join(out) + "\n"
+
+    removed = sorted(set(before) - {b[0] for b in blocks})
+    print(f"{'DRY RUN — ' if dry else ''}{len(blocks)} blocks from "
+          f"{sum(len(g['paths']) for _, _, g in blocks)} files "
+          f"({sum(r[1] for r in report)} keys)\n")
+    for status, n, name, paths, notes in report:
+        extra = f"  +{len(paths) - 1} identical cop{'y' if len(paths) == 2 else 'ies'}" if len(paths) > 1 else ""
+        note = f"  ({', '.join(notes)})" if notes else ""
+        print(f"  {status:8}{n:4} keys  [{name}]{extra}{note}")
+    for name in removed:
+        print(f"  removed            [{name}]  (source file gone)")
+    for p in empty:
+        print(f"  empty, skipped     {p}")
+
+    if curated_pairs(new_text) != curated_pairs(current):
+        sys.exit("env-sync: hand-edited keys would change — aborting, nothing written")
+    if dry:
+        return 0
+
+    bak = ENV_FILE.with_name(ENV_FILE.name + ".bak")
+    tmp = ENV_FILE.with_name(ENV_FILE.name + ".tmp")
+    for target, text in ((bak, current), (tmp, new_text)):
+        if target.exists():
+            target.unlink()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+    os.replace(tmp, ENV_FILE)
+    os.chmod(ENV_FILE, 0o600)
+    print(f"\nwrote {ENV_FILE} (600), previous version at {bak}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

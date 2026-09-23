@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""jab — agent-browser with Jev doing the element-finding and page-checking.
+
+Drop-in beside agent-browser (same daemon, same session, same @refs). Every command
+takes ONE accessibility snapshot and ONE Jev request (~200 ms), so a step that used to
+be snapshot -> read 150 lines -> click becomes one call.
+
+  jab click "the Save button on the profile form"      find + click
+  jab fill  "email field" "qa@example.com"             find + fill (value never leaves the machine)
+  jab select "state dropdown" "Michigan"               find + select
+  jab find  "add to cart button for the backpack"      just print ref / label / confidence
+  jab check "an error message is visible" "the user is logged in"      PASS/FAIL per statement
+  jab snap  "the login form"                           snapshot trimmed to what matters for a goal
+  jab wait                                             block until the page stops changing
+  jab do    "<goal>" --value email=env:X --done-url REGEX    multi-step flow via hunch
+
+Options: --session NAME (or $AGENT_BROWSER_SESSION), --min-conf 0.7, --no-text (send only
+element labels to Jev, never page text), --json.  Exit 0 ok · 2 not confident / check failed
+· 3 Jev unavailable (nothing was clicked).
+
+What leaves the machine: element roles + labels, the URL path, up to 2500 chars of visible
+page text (unless --no-text), and your instruction. Never field values.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+CLICKABLE = {"button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "option", "combobox", "listbox", "menuitemcheckbox", "menuitemradio"}
+TYPABLE = {"textbox", "searchbox", "spinbutton", "combobox"}
+LINE = re.compile(r'^(\s*)-\s+(\w+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\[([^\]]*)\](.*)$')
+TEXT_CHARS = 2500
+
+
+def ab(session, *args, timeout=60):
+    p = subprocess.run(["agent-browser", "--session", session, *args], capture_output=True, text=True, timeout=timeout)
+    return p.stdout.strip(), p.returncode
+
+
+_KEY = None
+
+
+def _key():
+    """TYPESAFE_API_KEY from the environment, else once per process via with-env (never printed)."""
+    global _KEY
+    if _KEY is None:
+        _KEY = os.environ.get("TYPESAFE_API_KEY", "").strip()
+        if not _KEY:
+            try:
+                _KEY = subprocess.run([os.path.expanduser("~/.local/bin/with-env"), "-q", "--only", "TYPESAFE_API_KEY", "printenv", "TYPESAFE_API_KEY"],
+                                      capture_output=True, text=True, timeout=3).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                _KEY = ""
+    return _KEY
+
+
+def jev(state, questions, purpose, deadline=2500):
+    """Direct call (no jev-ask subprocess): saves ~0.4 s per step. Logs one line like jev-ask does."""
+    import http.client
+    key = _key()
+    if not key or os.environ.get("JEV_OFF", "") in ("1", "true", "on"):
+        return None
+    started = time.perf_counter()
+    outcome = "error"
+    try:
+        conn = http.client.HTTPSConnection("api.typesafe.ai", timeout=deadline / 1000)
+        conn.request("POST", "/v1/systemone", body=json.dumps({"model": os.environ.get("JEV_MODEL", "jev-1.13.0"), "state": state[:24000], "questions": questions}),
+                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        resp = conn.getresponse()
+        raw = resp.read()
+        if resp.status != 200:
+            outcome = f"http_{resp.status}"
+            return None
+        data = json.loads(raw)
+        outcome = "ok"
+        return data.get("answers")
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        try:
+            d = os.path.expanduser("~/.local/state/jev"); os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "jev.log"), "a") as fh:
+                fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {purpose} {int((time.perf_counter() - started) * 1000)}ms in_tokens=- {outcome}\n")
+        except OSError:
+            pass
+
+
+def snapshot(session, interactive=True):
+    raw, _ = ab(session, "snapshot", "-i" if interactive else "-c")
+    els, context = [], {}
+    prev_label = ""
+    for line in raw.splitlines():
+        m = LINE.match(line)
+        if not m:
+            continue
+        indent, role, label, attrs, tail = m.groups()
+        label = (label or "").strip()
+        ref = re.search(r"\bref=(e\d+)", attrs)
+        if role in ("heading", "StaticText", "LabelText") and label:
+            prev_label = label[:60]
+        if not ref:
+            continue
+        value = tail.strip().lstrip(":").strip()
+        els.append({"ref": ref.group(1), "role": role, "label": label[:80] or "(no label)", "value": value[:40],
+                    "disabled": "disabled" in attrs, "near": prev_label})
+    return els
+
+
+def page_info(session, want_text):
+    js = ("JSON.stringify({u: location.origin + location.pathname, t: document.title, "
+          f"x: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, {TEXT_CHARS if want_text else 0})}})")
+    out, _ = ab(session, "eval", js)
+    try:
+        d = json.loads(out)
+        return json.loads(d) if isinstance(d, str) else d
+    except ValueError:
+        return {"u": "", "t": "", "x": ""}
+
+
+def describe(e, with_value=False):
+    s = f'{e["role"]} "{e["label"]}"'
+    if e["role"] in TYPABLE:
+        s += " · filled" if e["value"] else " · empty"
+    if e["near"] and e["near"] != e["label"]:
+        s += f" (near: {e['near']})"
+    if e["disabled"]:
+        s += " · disabled"
+    return s
+
+
+def table(els):
+    return "\n".join(f"[{e['ref']}] {describe(e)}" for e in els) or "(no interactive elements)"
+
+
+def state_for(session, els, args, extra=""):
+    info = page_info(session, not args.no_text)
+    parts = [f"PAGE: {info.get('t', '')} — {info.get('u', '')}"]
+    if info.get("x"):
+        parts.append(f"VISIBLE TEXT: {info['x']}")
+    parts.append(f"ELEMENTS, in document order:\n{table(els)}")
+    if extra:
+        parts.append(extra)
+    return "\n\n".join(parts), info
+
+
+def pick(session, args, target, pool_roles, verb):
+    els = [e for e in snapshot(session) if e["role"] in pool_roles and not e["disabled"]]
+    if not els:
+        return None, {"error": f"no {verb}able elements on the page"}
+    state, info = state_for(session, els, args, f"TARGET DESCRIPTION: {target}")
+    crit = {e["ref"]: describe(e) for e in els}
+    a = jev(state, {
+        "target": {"type": "choice", "criteria": crit, "instructions": f"Which element best matches the TARGET DESCRIPTION for a {verb}? Pick the one a careful human tester would {verb}."},
+        "present": {"type": "noul", "instructions": "Is there any element on the page that matches the TARGET DESCRIPTION at all?"},
+    }, purpose=f"jab-{verb}")
+    if a is None:
+        return None, {"error": "jev unavailable"}
+    t = a.get("target") or {}
+    ref, conf = t.get("choice"), float(t.get("confidence", 0))
+    present = float((a.get("present") or {}).get("noul", 1))
+    probs = sorted((t.get("probabilities") or {}).items(), key=lambda kv: -kv[1])[:3]
+    return {"ref": ref, "label": crit.get(ref), "confidence": round(conf, 2), "present": round(present, 2),
+            "candidates": [{"ref": r, "label": crit.get(r), "p": round(p, 2)} for r, p in probs], "url": info.get("u")}, None
+
+
+def fingerprint(session):
+    """One cheap eval (~80 ms): URL + a hash of the DOM's text and structure."""
+    js = ("(function(){var b=document.body;var t=b?b.innerText:'';var h=0;for(var i=0;i<t.length;i++){h=(h*31+t.charCodeAt(i))|0;}"
+          "return location.href+'|'+(b?b.querySelectorAll('*').length:0)+'|'+h+'|'+document.activeElement.tagName+'|'+(document.activeElement.value||'').length;})()")
+    out, _ = ab(session, "eval", js)
+    return out
+
+
+def settle(session, before, budget_ms=1500):
+    """Wait for the page to change after an action, then for it to hold still. Returns changed?"""
+    end = time.perf_counter() + budget_ms / 1000
+    fp = fingerprint(session)
+    while fp == before and time.perf_counter() < end:
+        time.sleep(0.15)
+        fp = fingerprint(session)
+    changed = fp != before
+    if changed:
+        stable_since = time.perf_counter()
+        while time.perf_counter() - stable_since < 0.3:
+            time.sleep(0.1)
+            nfp = fingerprint(session)
+            if nfp != fp:
+                fp, stable_since = nfp, time.perf_counter()
+    return changed
+
+
+def out(obj, args, code=0):
+    if args.json:
+        print(json.dumps(obj))
+    else:
+        for k, v in obj.items():
+            if k == "candidates":
+                print("  candidates: " + "; ".join(f"[{c['ref']}] {c['label']} p={c['p']}" for c in v))
+            elif k == "checks":
+                for c in v:
+                    print(f"  {c['verdict']:4} p={c['p']:.2f}  {c['statement']}")
+            elif k == "elements":
+                print(v)
+            else:
+                print(f"  {k}: {v}")
+    sys.exit(code)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("cmd", choices=["click", "fill", "select", "find", "check", "snap", "wait", "do"])
+    ap.add_argument("args", nargs="*")
+    ap.add_argument("--session", default=os.environ.get("AGENT_BROWSER_SESSION", "default"))
+    ap.add_argument("--min-conf", type=float, default=0.7)
+    ap.add_argument("--no-text", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--value", action="append", default=[])
+    ap.add_argument("--done-url")
+    ap.add_argument("--done-text")
+    ap.add_argument("--url")
+    a = ap.parse_args()
+    s = a.session
+    os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.environ.get('PATH', '')}"
+
+    if a.cmd == "wait":
+        before = fingerprint(s)
+        changed = settle(s, before, 3000)
+        out({"changed": changed, "url": page_info(s, False).get("u")}, a)
+
+    if a.cmd == "do":
+        if not a.args:
+            ap.error("do needs a goal")
+        cmd = ["hunch", "--session", s, "--goal", a.args[0]] + sum((["--value", v] for v in a.value), [])
+        for k in ("done_url", "done_text", "url"):
+            if getattr(a, k):
+                cmd += [f"--{k.replace('_', '-')}", getattr(a, k)]
+        if a.no_text:
+            cmd.append("--no-page-text")
+        os.execvp("hunch", cmd)
+
+    if a.cmd in ("click", "fill", "select", "find"):
+        if not a.args:
+            ap.error(f"{a.cmd} needs a description")
+        target = a.args[0]
+        verb = "click" if a.cmd in ("click", "find") else ("type into" if a.cmd == "fill" else "select from")
+        roles = CLICKABLE | TYPABLE if a.cmd == "find" else (TYPABLE if a.cmd == "fill" else ({"combobox", "listbox"} if a.cmd == "select" else CLICKABLE))
+        res, err = pick(s, a, target, roles, verb)
+        if err:
+            out(err, a, 3 if "jev" in err["error"] else 2)
+        if res["present"] < 0.4 or res["confidence"] < a.min_conf:
+            res["action"] = "none — not confident (run `agent-browser snapshot -i` and pick by hand)"
+            out(res, a, 2)
+        if a.cmd == "find":
+            out(res, a)
+        before = fingerprint(s) if a.cmd == "click" else None
+        if a.cmd == "click":
+            ab(s, "click", f"@{res['ref']}")
+        elif a.cmd == "fill":
+            if len(a.args) < 2:
+                ap.error("fill needs a description and a value")
+            ab(s, "fill", f"@{res['ref']}", a.args[1])
+        else:
+            if len(a.args) < 2:
+                ap.error("select needs a description and an option")
+            ab(s, "select", f"@{res['ref']}", a.args[1])
+        res["action"] = f"{a.cmd} [{res['ref']}] {res['label']}"
+        res["page_changed"] = settle(s, before) if a.cmd == "click" else True   # fill/select are synchronous
+        res["url"] = page_info(s, False).get("u")
+        out(res, a)
+
+    if a.cmd == "check":
+        if not a.args:
+            ap.error("check needs at least one statement")
+        els = snapshot(s)
+        state, info = state_for(s, els, a)
+        qs = {f"c{i}": {"type": "noul", "instructions": f"Judging only from the PAGE, VISIBLE TEXT and ELEMENTS: is this statement true right now? \"{stmt}\""}
+              for i, stmt in enumerate(a.args, 1)}
+        ans = jev(state, qs, "jab-check")
+        if ans is None:
+            out({"error": "jev unavailable"}, a, 3)
+        checks, ok = [], True
+        for i, stmt in enumerate(a.args, 1):
+            p = float((ans.get(f"c{i}") or {}).get("noul", 0))
+            v = "PASS" if p >= 0.5 else "FAIL"
+            ok &= v == "PASS"
+            checks.append({"statement": stmt, "p": round(p, 2), "verdict": v})
+        out({"url": info.get("u"), "checks": checks, "all_pass": ok}, a, 0 if ok else 2)
+
+    if a.cmd == "snap":
+        goal = a.args[0] if a.args else "anything a tester would interact with"
+        els = snapshot(s)
+        if not els:
+            out({"elements": "(no interactive elements)"}, a)
+        state, info = state_for(s, els, a, f"GOAL: {goal}")
+        qs = {e["ref"]: {"type": "noul", "instructions": f"Would a tester need to click, fill or read element [{e['ref']}] to accomplish the GOAL from this page? Answer no for elements that merely exist on the page but play no part in the GOAL."} for e in els[:120]}
+        ans = jev(state, qs, "jab-snap", deadline=4000)
+        if ans is None:
+            out({"url": info.get("u"), "elements": table(els), "note": "jev unavailable — full list"}, a)
+        keep = []
+        for e in els[:120]:
+            p = float((ans.get(e["ref"]) or {}).get("noul", 0))
+            if p >= 0.6 or (e["role"] in TYPABLE and p >= 0.4):
+                keep.append((p, e))
+        keep.sort(key=lambda x: -x[0])
+        lines = [f"[{e['ref']}] {describe(e)}  (p={p:.2f})" for p, e in keep]
+        out({"url": info.get("u"), "kept": f"{len(keep)} of {len(els)}", "elements": "\n".join(lines) or "(nothing relevant)"}, a)
+
+
+if __name__ == "__main__":
+    main()

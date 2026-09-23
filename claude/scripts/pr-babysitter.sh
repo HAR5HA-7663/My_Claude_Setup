@@ -24,14 +24,20 @@ OWNER=$(echo "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+)
 REPO=$(echo  "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+).*#\2#')
 PR=$(echo    "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+).*#\3#')
 
-# Map GitHub repo -> local checkout (Bevri repos). Extend as needed.
-case "$REPO" in
-  API-backend)      DIR="$HOME/Desktop/Bevri/API-backend" ;;
-  bevri-web-portal) DIR="$HOME/Desktop/Bevri/bevri-web-portal" ;;
-  bevri-prisma)     DIR="$HOME/Desktop/Bevri/bevri-prisma" ;;
-  *)                DIR="" ;;
+# Map GitHub org/repo -> local checkout. Only bevri-ai and teli-ai-llc are
+# babysat (same gate as pr-babysitter-hook.sh / pr-babysitter-async.sh).
+case "$OWNER/$REPO" in
+  bevri-ai/API-backend)      DIR="$HOME/Desktop/Bevri/API-backend" ;;
+  bevri-ai/bevri-web-portal) DIR="$HOME/Desktop/Bevri/bevri-web-portal" ;;
+  bevri-ai/bevri-prisma)     DIR="$HOME/Desktop/Bevri/bevri-prisma" ;;
+  teli-ai-llc/*)             DIR="$HOME/Desktop/teli/$REPO" ;;
+  *)                         DIR="" ;;
 esac
-[ -z "$DIR" ] || [ ! -d "$DIR/.git" ] && { echo "no local checkout for $REPO — nothing to babysit"; exit 0; }
+[ -z "$DIR" ] || [ ! -d "$DIR/.git" ] && { echo "no local checkout for $OWNER/$REPO — nothing to babysit"; exit 0; }
+# The checkout must actually be a clone of THIS repo — never sync/push a folder
+# that merely shares the name.
+git -C "$DIR" remote get-url origin 2>/dev/null | grep -qiE "github\.com[:/]$OWNER/$REPO(\.git)?/?$" \
+  || { echo "$DIR origin is not $OWNER/$REPO — nothing to babysit"; exit 0; }
 
 LOG="$HOME/.claude/pr-babysitter-${REPO}-${PR}.log"
 # Single instance per PR — mkdir is atomic (macOS has no flock).

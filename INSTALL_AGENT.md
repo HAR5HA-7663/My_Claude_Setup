@@ -25,12 +25,14 @@ max 4 options per question, so split across questions like this (or equivalent):
   - Personal skills (44) — *sub-selected in Phase 1b, never bulk-installed*
   - Agents + slash commands
 - **Question 2 — Tooling** (default ON):
-  - Hook scripts (malware guards + PR babysitter)
+  - Hook + automation scripts (malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard)
+  - CLI tools (`bin/`: with-env, env-sync, jev-ask, jev-step, jab, jev-replicate) + shell launcher (`shell/`)
   - Custom statusline
-  - Plugins (8, bringing 30 more skills) — *sub-selected in Phase 1b*
+  - Plugins (7 enabled, bringing 73 more skills) — *sub-selected in Phase 1b*
 - **Question 3 — Integrations** (default OFF, each has prereqs/secrets):
-  - MCP servers (then sub-select which of the 5)
-  - External CLI tools (agent-browser, carbontype, mcp_excalidraw)
+  - MCP servers (then sub-select which of the 4)
+  - External CLI tools (agent-browser, hunch, uv, carbontype, mcp_excalidraw) + the TypeSafe key in `~/.env`
+  - launchd jobs (macOS schedules — brain watcher/sync, daily brain sync, malware sweep, mem-guard, triage; run them on ONE machine only)
   - Brain system pointer (~/brain — manual copy by user)
 
 If `AskUserQuestion` is unavailable in your harness, print a numbered checklist and have
@@ -119,9 +121,25 @@ Copy `claude/agents/*.md` → `~/.claude/agents/`. These pin models (haiku/sonne
 Copy `claude/commands/*.md` → `~/.claude/commands/`.
 
 ### hook-scripts
-1. Copy `claude/scripts/*.sh` → `~/.claude/scripts/` and `chmod +x` them (macOS/Linux).
-2. They require `bash`, `git`, and (PR babysitter) `gh` authenticated. On Windows confirm hooks execute via Git Bash — run one manually as a smoke test.
-3. These are wired by the hooks block installed in core-settings.
+1. Copy `claude/scripts/*` → `~/.claude/scripts/` and `chmod +x` them (macOS/Linux).
+2. They require `bash`, `git`, `python3`, `jq`, and (PR babysitter) `gh` authenticated. On Windows confirm hooks execute via Git Bash — run one manually as a smoke test.
+3. These are wired by the hooks block installed in core-settings (PreToolUse: git-push guard → local malware precheck → Jev risk gate; PostToolUse: malware postcheck, PR babysitter; SessionStart: brain context, TCC cleaner).
+4. The `jev-*` scripts need `bin/jev-ask` on PATH and `TYPESAFE_API_KEY` in `~/.env`; without them they fail open (no gate, no pre-filter) and say so in their logs under `~/.local/state/jev/`.
+5. The malware IOC list is NOT in the repo. `sync-malware-iocs.py` expects `~/.claude/scripts/malware-ioc-canonical.txt` (one literal per line) — ask the user for it or the guards keep their built-in split patterns.
+
+### cli-tools
+1. Copy `bin/*` → `~/.local/bin/` (`chmod +x`, make sure it is on PATH). They are plain `sh`/`python3` scripts.
+2. Create `~/.env` (mode 600) with at least `[personal]` + `TYPESAFE_API_KEY=` (ask the user; never invent it). `with-env --blocks` must list the block; `with-env` refuses to run if the file is not mode 600/400.
+3. `jev-step` and `jab` additionally need agent-browser and hunch (see external-deps.md).
+4. Smoke test: `printf 'git push --force origin main' | jev-ask --purpose test --noul risky "Would this rewrite shared git history?"` prints a probability.
+
+### launchd-jobs (macOS only, default OFF)
+1. Rewrite every `/Users/HAR5HA` in `launchd/*.plist` to the new home, copy to `~/Library/LaunchAgents/`, `launchctl load` each.
+2. `com.harsha.brain-watch` / `brain-sync` / `daily-brain-sync` need `~/brain`; `malware-sweep` and `mem-guard` need the scripts from hook-scripts; the triage jobs need the triage skills, Slack plugin / Monday MCP and the key.
+3. Only ONE machine should run daily-brain-sync and the triage jobs, or digests duplicate. Linux: systemd user units; Windows: Task Scheduler.
+
+### shell
+Append `shell/zshrc-claude.zsh` to `~/.zshrc` (or the equivalent). It makes `claude` start with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` (required by the jev-compact plugin, harmless otherwise) and adds `claude-plain`. Requires Claude Code ≥ 2.1.274.
 
 ### statusline
 1. Copy `claude/statusline-custom.sh`, `claude/statusline.sh`, and `claude/statusline/` → `~/.claude/`, `chmod +x` the scripts.
@@ -138,24 +156,24 @@ Run in a Claude Code session (or via `claude` CLI where supported):
 
 | Plugin | Command | Brings |
 |---|---|---|
-| caveman | `claude plugin marketplace add JuliusBrussee/caveman` then `/plugin install caveman@caveman` | 4 skills (compressed-output modes) |
 | superpowers | `/plugin install superpowers@claude-plugins-official` | 14 process skills **+ an always-invoke-a-skill rule in every session** — say this out loud before installing |
-| slack | `/plugin install slack@claude-plugins-official` | 7 skills + 5 slash commands |
-| coderabbit | `/plugin install coderabbit@claude-plugins-official` | 2 skills + `/coderabbit-review` |
-| claude-md-management | `/plugin install claude-md-management@claude-plugins-official` | 1 skill + `/revise-claude-md` |
-| context7 | `/plugin install context7@claude-plugins-official` | 0 skills — an MCP server for live library docs |
-| imessage *(macOS)* | `/plugin install imessage@claude-plugins-official` | 2 skills |
-| swift-lsp *(macOS)* | `/plugin install swift-lsp@claude-plugins-official` | 0 skills — Swift LSP integration |
+| vercel | `/plugin install vercel@claude-plugins-official` | 35 skills, 3 agents, 5 commands, Vercel MCP (OAuth on first use) |
+| stripe | `/plugin install stripe@claude-plugins-official` | 9 skills, 2 commands, Stripe MCP (OAuth on first use) |
+| slack | `/plugin install slack@claude-plugins-official` | 8 skills + 5 slash commands + Slack MCP (OAuth on first use) |
+| caveman | `claude plugin marketplace add JuliusBrussee/caveman` then `/plugin install caveman@caveman` | 4 skills (compressed-output modes) |
+| codex | `claude plugin marketplace add openai/codex-plugin-cc` then `/plugin install codex@openai-codex` | 3 skills, 8 commands, `codex-rescue` agent (needs the Codex CLI) |
+| jev-compact | `git clone https://github.com/HAR5HA-7663/jev-compact ~/Desktop/Personal/jev-compact && claude plugin marketplace add ~/Desktop/Personal/jev-compact && claude plugin install jev-compact@jev-compact --config targetPercent=45 --config compactAtPercent=75 --config preserveRecentMessages=12 --config minReductionRatio=0.25 --config model=jev-1.13.0 --config brainArchive=true` | prune-not-summarise `/compact`; needs the `shell/` launcher + `TYPESAFE_API_KEY` in `~/.env` (falls back to the built-in summary without it) |
+| coderabbit / imessage / swift-lsp | `/plugin install <name>@claude-plugins-official` | installed but **disabled** on the source machine — skip unless the user asks |
 
 Then **strip `enabledPlugins` and `extraKnownMarketplaces` entries in the installed
 `settings.json` for every plugin the user declined** — leaving them in makes Claude Code
 complain about plugins that were never installed.
 
-Slack / CodeRabbit / Context7 prompt for their own auth on first use — let them.
+Slack / Vercel / Stripe / CodeRabbit prompt for their own auth on first use — let them.
 
 ### mcp-servers
 For each server the user sub-selected, read its `_prereq` in `mcp/mcp-servers.json`,
-satisfy it, replace `<PLACEHOLDERS>` (`<HOME>`, `<COMPAI_API_KEY>` — ask the user for
+satisfy it, replace `<PLACEHOLDERS>` (`<HOME>` and any `<…_KEY>` — ask the user for
 secrets, never invent them), then register with `claude mcp add --scope user` (or merge
 into `~/.claude.json` `mcpServers`). Skip any server whose prereq can't be met and tell
 the user why.
@@ -181,6 +199,8 @@ Run through this checklist and report results honestly (don't claim success with
 4. If hooks installed: `git push` in a scratch repo triggers the malware-guard status message.
 5. If MCP servers installed: `/mcp` shows them connected (monday will ask for OAuth — expected).
 6. If brain restored: new session auto-loads the brain context via the SessionStart hook.
+7. If cli-tools installed: `with-env --blocks` lists `[personal]`; the `jev-ask` smoke test above prints a probability; `~/.local/state/jev/bash-gate.log` gets a line after any non-read-only Bash command.
+8. If jev-compact installed: `/compact` in a session with a few tool calls writes a line to `~/.local/state/jev/compact.log` (`pruned` or `hybrid`).
 
 Report a final summary: what was installed, what was skipped and why, and any manual
 follow-ups left for the user (auth logins, brain copy, API keys).

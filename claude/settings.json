@@ -6,7 +6,8 @@
   },
   "permissions": {
     "allow": [
-      "Bash(agent-browser:*)"
+      "Bash(agent-browser:*)",
+      "mcp__claude-in-chrome__file_upload"
     ],
     "deny": [
       "mcp__gmessages__send_message",
@@ -20,7 +21,25 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
+  "model": "opus[1m]",
+  "skillOverrides": {
+    "internal-comms": "off",
+    "slack-gif-creator": "off",
+    "auto-diagram": "off",
+    "pptx": "off",
+    "xlsx": "off",
+    "doc-coauthoring": "off",
+    "algorithmic-art": "off",
+    "gsap-core": "off",
+    "gsap-timeline": "off",
+    "gsap-plugins": "off",
+    "gsap-frameworks": "off",
+    "gsap-performance": "off",
+    "gsap-utils": "off",
+    "gsap-react": "off",
+    "gsap-scrolltrigger": "off",
+    "banner-design": "off"
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -38,6 +57,23 @@
             "command": "bash ~/.claude/scripts/local-malware-precheck.sh",
             "timeout": 30,
             "statusMessage": "Scanning CWD for malware impostors before npm install/dev…"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/jev-bash-risk-gate.sh",
+            "timeout": 5,
+            "statusMessage": "jev-gate: judging command risk…"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/mem-guard.sh hook",
+            "timeout": 10,
+            "statusMessage": "mem-guard: checking RAM before spawning…"
           }
         ]
       }
@@ -79,11 +115,19 @@
             "command": "bash ~/brain/scripts/session_context.sh",
             "timeout": 15,
             "statusMessage": "Loading Harsha brain context…"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/tcc-clean-claude-residue.sh",
+            "timeout": 15,
+            "statusMessage": "Checking for stale Claude privacy grants…"
           }
         ]
       }
     ]
   },
+  "disableRemoteControl": true,
+  "workflowSizeGuideline": "small",
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline-custom.sh"
@@ -91,12 +135,14 @@
   "enabledPlugins": {
     "caveman@caveman": true,
     "superpowers@claude-plugins-official": true,
-    "context7@claude-plugins-official": true,
     "slack@claude-plugins-official": true,
-    "swift-lsp@claude-plugins-official": true,
-    "coderabbit@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true,
-    "imessage@claude-plugins-official": true
+    "swift-lsp@claude-plugins-official": false,
+    "coderabbit@claude-plugins-official": false,
+    "imessage@claude-plugins-official": false,
+    "codex@openai-codex": true,
+    "stripe@claude-plugins-official": true,
+    "vercel@claude-plugins-official": true,
+    "jev-compact@jev-compact": true
   },
   "extraKnownMarketplaces": {
     "caveman": {
@@ -104,9 +150,35 @@
         "source": "github",
         "repo": "JuliusBrussee/caveman"
       }
+    },
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    },
+    "jev-compact": {
+      "source": {
+        "source": "directory",
+        "path": "/Users/HAR5HA/Desktop/Personal/jev-compact"
+      }
     }
   },
+  "outputStyle": "Concise",
+  "feedbackDrafts": "off",
   "effortLevel": "xhigh",
+  "pluginConfigs": {
+    "jev-compact@jev-compact": {
+      "options": {
+        "targetPercent": 45,
+        "compactAtPercent": 75,
+        "preserveRecentMessages": 12,
+        "minReductionRatio": 0.25,
+        "brainArchive": true,
+        "model": "jev-1.13.0"
+      }
+    }
+  },
   "tui": "fullscreen",
   "voice": {
     "enabled": true,
@@ -114,6 +186,11 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
+  "switchModelsOnFlag": false,
+  "remoteControlAtStartup": false,
+  "crossSessionInbound": "accept",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "voiceEnabled": true
 }

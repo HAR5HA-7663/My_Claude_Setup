@@ -1,0 +1,200 @@
+#!/bin/sh
+# with-env — run a command with variables from the universal ~/.env loaded.
+# On-demand by design: nothing in ~/.env is exported into normal shells, so
+# unrelated child processes (npm postinstall scripts, random CLIs) never see it.
+# Run `with-env --help` for usage and the file format.
+
+set -eu
+
+ENV_FILE="${UNIVERSAL_ENV_FILE:-$HOME/.env}"
+
+die() { echo "with-env: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+with-env — run a command with variables from the universal ~/.env
+
+  with-env --scope bevri --only STRIPE_SECRET_KEY <cmd> [args...]
+  with-env --only TYPESAFE_API_KEY <cmd>     no scope: NAME must be unambiguous
+  with-env --scope bevri/api-backend <cmd>   load one whole block (exact name)
+  with-env --blocks [--scope S]              block names with key counts
+  with-env --list [--scope S]                variable NAMES per block, never values
+  with-env --has NAME [--scope S]            exit 0 if NAME resolves
+  -q                                         don't report which block a key came from
+
+~/.env is organised into owner sections — personal, bevri, teli, fsbo, other —
+each holding a hand-edited [owner] block plus one [owner/repo] block per project
+.env mirrored in by `env-sync` (@local = .env.local). The command always receives
+a key under its plain NAME, so tools expecting STRIPE_SECRET_KEY work unchanged
+whichever company's key is loaded.
+
+How `--scope S --only NAME` finds a key:
+  1. the block named exactly [S]
+  2. otherwise the project blocks under [S/...]
+  3. otherwise scratch copies under [S/...] (tmp/, worktrees: QA rigs, demos)
+Within a step, every block holding NAME must agree on the value. If they differ
+it stops and lists them — pass a more specific --scope. It never picks for you,
+and it never crosses owners: --scope bevri cannot return a teli key.
+
+File format: NAME=value, one per line, no `export`. Values are literal (no $
+expansion); surrounding quotes are stripped. Any new [block] header works.
+~/.env must be mode 600 or with-env refuses to run.
+
+Variables expand in the shell that runs <cmd>, not the one calling with-env:
+  with-env --only TYPESAFE_API_KEY sh -c 'curl -H "Authorization: Bearer $TYPESAFE_API_KEY" ...'
+EOF
+}
+
+# mode: list | blocks | load.  want = block ("" = any).  only = ",A,B," ("" = whole block).
+AWK_PROG='
+function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+function header(s) { if (!(s in printed)) { print "[" s "]"; printed[s] = 1 } }
+function under(s) { return want == "" || want == s || index(s, want "/") == 1 }
+function fail(msg) { printf "with-env: %s\n", msg > "/dev/stderr"; bad = 1 }
+BEGIN {
+  scope = "personal"; nsel = 0; nscopes = 0
+  HDR = "^\\[[A-Za-z0-9_./@-]+\\]$"; SCRATCH = "/(tmp|worktrees|\\.worktrees)/"
+}
+{
+  line = trim($0)
+  if (line == "" || substr(line, 1, 1) == "#") next
+  if (line ~ HDR) {
+    scope = tolower(substr(line, 2, length(line) - 2))
+    if (!(scope in scopes)) { scopes[scope] = 1; sorder[++nscopes] = scope }
+    if (mode == "list" && under(scope)) header(scope)
+    next
+  }
+  sub(/^export[ \t]+/, "", line)
+  eq = index(line, "=")
+  if (eq < 2) next
+  name = trim(substr(line, 1, eq - 1))
+  if (name !~ /^[A-Za-z_][A-Za-z0-9_]*$/) next
+  val = trim(substr(line, eq + 1))
+  n = length(val)
+  if (n >= 2) {
+    f = substr(val, 1, 1); l = substr(val, n, 1)
+    if ((f == "\"" || f == "\047") && f == l) val = substr(val, 2, n - 2)
+  }
+  if (!(scope in scopes)) { scopes[scope] = 1; sorder[++nscopes] = scope }
+  count[scope]++
+  if (mode != "load") {
+    if (mode == "list" && under(scope)) { header(scope); print "  " name }
+    next
+  }
+  if (val == "" || !under(scope)) next
+  if (only == "") {                       # whole-block load: exact block only
+    if (scope != want) next
+    if (!(name in value)) order[++nsel] = name
+    value[name] = val
+    next
+  }
+  if (index(only, "," name ",") == 0) next
+  if (want != "" && scope == want) rank = 0
+  else rank = (want != "" && ("/" scope "/") ~ SCRATCH) ? 2 : 1   # no scope: no precedence, all must agree
+  if ((name, scope) in slot) i = slot[name, scope]
+  else { i = ++ncand[name]; slot[name, scope] = i }
+  cscope[name, i] = scope; cval[name, i] = val; crank[name, i] = rank
+}
+END {
+  found = (want == "")
+  for (i = 1; i <= nscopes; i++) if (under(sorder[i])) found = 1
+  if (!found) { fail("no [" want "] block — see: with-env --blocks"); exit 3 }
+  if (mode == "blocks") {
+    for (i = 1; i <= nscopes; i++) if (under(sorder[i])) printf "%4d  [%s]\n", count[sorder[i]], sorder[i]
+    exit 0
+  }
+  if (mode == "list") exit 0
+
+  if (only == "") {
+    if (nsel == 0) {
+      subs = ""
+      for (i = 1; i <= nscopes; i++) if (index(sorder[i], want "/") == 1 && count[sorder[i]] > 0) subs = subs " [" sorder[i] "]"
+      fail("[" want "] has no keys of its own" (subs != "" ? " — add --only NAME to search its project blocks, or load one exactly:" subs : ""))
+      exit 5
+    }
+    for (i = 1; i <= nsel; i++) print order[i] "=" value[order[i]]
+    exit 0
+  }
+
+  m = split(only, o, ",")
+  for (k = 1; k <= m; k++) {
+    nm = o[k]
+    if (nm == "") continue
+    if (!(nm in ncand)) { fail(nm " is not defined" (want != "" ? " anywhere under [" want "]" : "")); continue }
+    best = 9
+    for (i = 1; i <= ncand[nm]; i++) if (crank[nm, i] < best) best = crank[nm, i]
+    pick = ""; from = ""; differ = 0
+    for (i = 1; i <= ncand[nm]; i++) {
+      if (crank[nm, i] != best) continue
+      if (from == "") { pick = cval[nm, i]; from = "[" cscope[nm, i] "]" }
+      else { from = from " [" cscope[nm, i] "]"; if (cval[nm, i] != pick) differ = 1 }
+    }
+    if (differ) { fail(nm " has different values in: " from " — pass a more specific --scope"); continue }
+    out[++nout] = nm "=" pick
+    if (!quiet && from != "[" want "]") printf "with-env: %s <- %s\n", nm, from > "/dev/stderr"
+  }
+  if (bad) exit 4
+  for (i = 1; i <= nout; i++) print out[i]
+}'
+
+query() {  # $1=mode $2=scope $3=only
+  awk -v mode="$1" -v want="$2" -v only="$3" -v quiet="$quiet" "$AWK_PROG" "$ENV_FILE"
+}
+
+mode=run; scope=""; only=""; has_name=""; quiet=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -q|--quiet) quiet=1; shift ;;
+    --list) mode=list; shift ;;
+    --blocks) mode=blocks; shift ;;
+    --has)
+      [ $# -ge 2 ] || die "--has needs a variable name"
+      mode=has; has_name=$2; shift 2 ;;
+    -s|--scope)
+      [ $# -ge 2 ] || die "--scope needs a block name"
+      scope=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]'); shift 2 ;;
+    -o|--only)
+      [ $# -ge 2 ] || die "--only needs a comma-separated list of names"
+      only=",$2,"; shift 2 ;;
+    --) shift; break ;;
+    -*) die "unknown option $1 (see --help)" ;;
+    *) break ;;
+  esac
+done
+
+scope=${scope%/}
+case "$scope" in *[!a-z0-9_./@-]*) die "invalid block name: $scope" ;; esac
+case "$only$has_name" in *[!A-Za-z0-9_,]*) die "invalid variable name in: $only$has_name" ;; esac
+
+[ -f "$ENV_FILE" ] || die "$ENV_FILE not found"
+
+# Fail closed if the file is readable by anyone but the owner.
+perm=$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")
+case "$perm" in
+  600|400) ;;
+  *) die "$ENV_FILE is mode $perm, expected 600 — run: chmod 600 $ENV_FILE" ;;
+esac
+
+case "$mode" in
+  list|blocks) query "$mode" "$scope" ""; exit $? ;;
+  has)
+    quiet=1
+    pair=$(query load "$scope" ",$has_name," 2>/dev/null) || exit 1
+    [ -n "${pair#*=}" ]; exit $? ;;
+esac
+
+[ $# -gt 0 ] || { usage >&2; exit 1; }
+[ -n "$scope$only" ] || die "pass --scope and/or --only — loading every block at once is not allowed"
+
+pairs=$(query load "$scope" "$only") || exit 1
+[ -n "$pairs" ] || die "nothing to load${scope:+ from [$scope]}"
+
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  export "${line%%=*}=${line#*=}"
+done <<EOF
+$pairs
+EOF
+
+exec "$@"

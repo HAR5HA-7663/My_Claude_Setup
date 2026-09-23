@@ -1,0 +1,95 @@
+#!/bin/bash
+# jev-replicate — copy today's Jev layer to another machine over ssh (key auth required).
+#
+#   jev-replicate mac  user@host      # full Claude Code layer: CLI, hooks, skills, brain patches
+#   jev-replicate pi   user@host      # brain query node only: Jev rerank + fixed store + key
+#   add --dry-run to see what would change.
+#
+# Never copies ~/.env wholesale. Only TYPESAFE_API_KEY travels (into the target's ~/.env
+# [personal] block, or the Pi brain's .env), and only if it is not already there.
+set -euo pipefail
+KIND="${1:?mac|pi}"; TARGET="${2:?user@host}"; DRY=""; [ "${3:-}" = "--dry-run" ] && DRY="--dry-run"
+SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+RS="rsync -az $DRY -e \"$SSH\""
+say() { printf '\n== %s\n' "$*"; }
+$SSH "$TARGET" true || { echo "cannot ssh to $TARGET with key auth — run: ssh-copy-id $TARGET"; exit 1; }
+KEY=$("$HOME/.local/bin/with-env" -q --only TYPESAFE_API_KEY printenv TYPESAFE_API_KEY)
+
+if [ "$KIND" = "mac" ]; then
+  say "CLI tools -> ~/.local/bin"
+  eval $RS ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} "$TARGET:.local/bin/"
+  say "hooks + helper scripts -> ~/.claude/scripts"
+  eval $RS ~/.claude/scripts/{jev-bash-risk-gate.sh,jev-pr-risk.sh,jev-verify-report,jev-triage-messages.py,jev-triage-tickets.py,headless-triage-run.sh,local-malware-precheck.sh,local-malware-postcheck.sh,pr-babysitter-hook.sh} "$TARGET:.claude/scripts/"
+  say "skills"
+  eval $RS ~/.claude/skills/{morning-triage,monday-triage,brain-query,wiki-ingest,wiki-lint,loopengg} "$TARGET:.claude/skills/"
+  say "jev-compact plugin source -> ~/Desktop/Personal/jev-compact"
+  eval $RS --exclude .git --exclude node_modules ~/Desktop/Personal/jev-compact/ "$TARGET:Desktop/Personal/jev-compact/"
+  say "brain scripts (if the target has ~/brain)"
+  if $SSH "$TARGET" '[ -d ~/brain/scripts ]'; then
+    eval $RS ~/brain/scripts/{jev.py,rerank.py,pages.py,fastembed.py,query.py,query_client.py,query_daemon.py,config.py,store.py,watch.py,ingest_check.py,staleness.py,session_triage.py,daily_session_sync.sh} ~/brain/scripts/tests "$TARGET:brain/scripts/"
+  else
+    echo "  (no ~/brain on target — skipped)"
+  fi
+  [ -n "$DRY" ] && { say "dry run: stopping before remote changes"; exit 0; }
+  say "remote: permissions, key, hook registration, CLAUDE.md section, launchd"
+  $SSH "$TARGET" "TS_KEY='$KEY' bash -s" <<'REMOTE'
+set -u
+chmod 755 ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} ~/.claude/scripts/{jev-*,headless-triage-run.sh,local-malware-*,pr-babysitter-hook.sh} 2>/dev/null
+mkdir -p ~/.local/state/jev
+# key -> ~/.env [personal] block (create the file if missing), never printed
+if [ ! -f ~/.env ]; then printf '[personal]\nTYPESAFE_API_KEY=%s\n\n[bevri]\n\n[teli]\n\n[fsbo]\n\n[other]\n' "$TS_KEY" > ~/.env; chmod 600 ~/.env; echo "  ~/.env created with the key"
+elif ! grep -q '^TYPESAFE_API_KEY=' ~/.env; then
+  if grep -q '^\[personal\]' ~/.env; then awk -v k="$TS_KEY" '{print} /^\[personal\]$/ && !d {print "TYPESAFE_API_KEY=" k; d=1}' ~/.env > ~/.env.tmp && mv ~/.env.tmp ~/.env
+  else printf '\n[personal]\nTYPESAFE_API_KEY=%s\n' "$TS_KEY" >> ~/.env; fi; chmod 600 ~/.env; echo "  key added to ~/.env"
+else echo "  key already present in ~/.env"; fi
+# hook registration
+python3 - <<'PY'
+import json, os
+p = os.path.expanduser("~/.claude/settings.json")
+cfg = json.load(open(p)) if os.path.exists(p) else {}
+hooks = cfg.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+grp = next((g for g in pre if g.get("matcher") == "Bash"), None)
+if grp is None:
+    grp = {"matcher": "Bash", "hooks": []}; pre.append(grp)
+if not any("jev-bash-risk-gate" in h.get("command", "") for h in grp["hooks"]):
+    grp["hooks"].append({"type": "command", "command": "bash ~/.claude/scripts/jev-bash-risk-gate.sh", "timeout": 5, "statusMessage": "jev-gate: judging command risk…"})
+    print("  jev-bash-risk-gate registered (PreToolUse Bash)")
+else:
+    print("  gate already registered")
+json.dump(cfg, open(p, "w"), indent=2, ensure_ascii=False); open(p, "a").write("\n")
+PY
+echo "  smoke test:"; printf 'git push --force origin main' | ~/.local/bin/jev-ask --purpose replicate-test --noul risky "Would this rewrite shared git history?" | head -c 120; echo
+# jev-compact plugin: local marketplace + install (needs claude >= 2.1.274 for function hooks)
+CL=$(command -v claude || ls ~/.local/bin/claude 2>/dev/null | head -1)
+if [ -n "$CL" ]; then
+  V=$("$CL" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  if [ "$(printf '%s\n2.1.274\n' "$V" | sort -V | head -1)" = "2.1.274" ]; then
+    "$CL" plugin marketplace list 2>/dev/null | grep -q 'jev-compact' || "$CL" plugin marketplace add ~/Desktop/Personal/jev-compact >/dev/null 2>&1 && echo "  marketplace jev-compact registered"
+    "$CL" plugin install jev-compact@jev-compact --config targetPercent=45 --config compactAtPercent=75 --config preserveRecentMessages=12 --config minReductionRatio=0.25 --config model=jev-1.13.0 --config brainArchive=true 2>&1 | tail -1
+    "$CL" plugin disable fast-jev-compaction@fast-jev-compaction >/dev/null 2>&1 || true
+    if ! grep -q 'CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 command claude' ~/.zshrc 2>/dev/null; then
+      printf '\n# claude with function hooks (jev-compact plugin); the plugin reads TYPESAFE_API_KEY from ~/.env itself\nclaude() {\n  CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 command claude "$@"\n}\nalias claude-plain='"'"'command claude'"'"'\n' >> ~/.zshrc
+      echo "  claude() launcher added to ~/.zshrc"
+    else echo "  claude() launcher already in ~/.zshrc"; fi
+  else echo "  claude $V < 2.1.274 — jev-compact needs function hooks; run 'claude update' then re-run jev-replicate"; fi
+else echo "  claude CLI not found on target — jev-compact plugin skipped"; fi
+REMOTE
+  say "CLAUDE.md: copy the 'Jev Decision Layer' + 'Universal Env File' sections by hand if the target keeps its own CLAUDE.md"
+  echo "   (not merged automatically — that file is hand-maintained per machine)"
+
+elif [ "$KIND" = "pi" ]; then
+  BR="${PI_BRAIN:-/mnt/nvme/brain}"
+  say "brain Jev query layer -> $BR/scripts"
+  eval $RS ~/brain/scripts/{jev.py,rerank.py,pages.py,fastembed.py,query.py,query_client.py,query_daemon.py,config.py,store.py,ingest_check.py,staleness.py} "$TARGET:$BR/scripts/"
+  [ -n "$DRY" ] && exit 0
+  $SSH "$TARGET" "TS_KEY='$KEY' BR='$BR' bash -s" <<'REMOTE'
+set -u
+grep -q '^TYPESAFE_API_KEY=' "$BR/.env" 2>/dev/null && echo "  key already in $BR/.env" || { printf 'TYPESAFE_API_KEY=%s\n' "$TS_KEY" >> "$BR/.env"; chmod 600 "$BR/.env"; echo "  key added to $BR/.env"; }
+cd "$BR" && .venv/bin/python -c "import httpx, chromadb; print('  deps ok: httpx', httpx.__version__)" 2>&1 | tail -1
+echo "  query smoke test:"; cd "$BR" && .venv/bin/python -m scripts.query "what is the teli carrier" --k 3 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('   verdict', d['verdict'], 'by', d['verdict_source'], 'total', d['timings_ms']['total'], 'ms')"
+REMOTE
+else
+  echo "usage: jev-replicate mac|pi user@host [--dry-run]"; exit 2
+fi
+say "done"

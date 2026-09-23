@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""jev-ask — one-shot call to Jev (TypeSafe's decision model) for shell scripts and hooks.
+
+    echo "<state text>" | jev-ask --purpose bash-gate --deadline 500 \
+        --noul risky "Would running this command destroy data?" \
+        --choice kind "What kind of command is this?" build=... test=... deploy=...
+
+    jev-ask --state-file report.txt --questions-file q.json --purpose verify
+
+Prints Jev's `answers` object as JSON on stdout. Exit codes:
+  0  answered            3  no answer (off, timeout, error, circuit open) — callers fail OPEN
+  2  bad arguments
+
+Design rules baked in, so every caller inherits them:
+  - hard total deadline (default 800 ms); the process never blocks longer than that
+  - key comes from $TYPESAFE_API_KEY or ~/.env via with-env; never printed
+  - JEV_OFF=1 disables everything; a `private` marker in the state text refuses to send it
+  - basic secret masking of the state (Bearer tokens, sk_/ghp_/apikey_ strings, key=value secrets)
+  - circuit breaker: 3 consecutive failures within 10 min -> skip for 10 min
+  - one log line per call in ~/.local/state/jev/jev.log (timing + outcome, never content)
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.client
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+HOST, PATH = "api.typesafe.ai", "/v1/systemone"
+MODEL = os.environ.get("JEV_MODEL", "jev-1.13.0")
+STATE_DIR = Path.home() / ".local/state/jev"
+LOG = STATE_DIR / "jev.log"
+WITH_ENV = Path.home() / ".local/bin/with-env"
+BREAKER_FAILURES, BREAKER_COOLDOWN = 3, 600
+MAX_STATE_CHARS = 24000
+
+SECRET_RES = [
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._\-]{12,}"),
+    re.compile(r"\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]{8,}"),
+    re.compile(r"\b(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\bapikey_[0-9a-f]{20,}[0-9a-f_]*"),
+    re.compile(r"\bsk-[A-Za-z0-9\-_]{20,}"),
+    re.compile(r"\bxox[abp]-[A-Za-z0-9\-]{10,}"),
+    re.compile(r"(?i)\b([A-Z0-9_]*(?:secret|token|password|passwd|api_key|apikey)[A-Z0-9_]*)(\s*[=:]\s*)(['\"]?)[^\s'\"]{6,}\3"),
+    re.compile(r"(?i)(postgres(?:ql)?://[^:\s]+:)[^@\s]+(@)"),
+]
+
+
+def mask(text: str) -> str:
+    text = SECRET_RES[0].sub(r"\1<redacted>", text)
+    for rx in SECRET_RES[1:6]:
+        text = rx.sub("<redacted>", text)
+    text = SECRET_RES[6].sub(r"\1\2<redacted>", text)
+    text = SECRET_RES[7].sub(r"\1<redacted>\2", text)
+    return text
+
+
+def log(purpose: str, ms: int, outcome: str, tokens="-") -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if LOG.exists() and LOG.stat().st_size > 1_000_000:
+            LOG.write_text("\n".join(LOG.read_text().splitlines()[-2000:]) + "\n")
+        with LOG.open("a") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {purpose} {ms}ms in_tokens={tokens} {outcome}\n")
+    except OSError:
+        pass
+
+
+def circuit_open(purpose: str) -> bool:
+    try:
+        lines = LOG.read_text().splitlines()[-300:]
+    except OSError:
+        return False
+    recent = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 5 and parts[1] == purpose:
+            try:
+                recent.append((time.mktime(time.strptime(parts[0], "%Y-%m-%dT%H:%M:%S")), parts[-1] == "ok"))
+            except ValueError:
+                pass
+    recent = recent[-BREAKER_FAILURES:]
+    if len(recent) < BREAKER_FAILURES or any(ok for _, ok in recent):
+        return False
+    return time.time() - recent[-1][0] < BREAKER_COOLDOWN
+
+
+def api_key() -> str:
+    key = os.environ.get("TYPESAFE_API_KEY", "").strip()
+    if not key and WITH_ENV.exists():
+        try:
+            key = subprocess.run([str(WITH_ENV), "-q", "--only", "TYPESAFE_API_KEY", "printenv", "TYPESAFE_API_KEY"],
+                                 capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            key = ""
+    return key
+
+
+def call(state: str, questions: dict, deadline_s: float, key: str) -> dict:
+    conn = http.client.HTTPSConnection(HOST, timeout=deadline_s)
+    conn.request("POST", PATH, body=json.dumps({"model": MODEL, "state": state, "questions": questions}),
+                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    resp = conn.getresponse()
+    raw = resp.read()
+    if resp.status != 200:
+        raise RuntimeError(f"http_{resp.status}")
+    return json.loads(raw)
+
+
+def parse_kv(pairs: list[str]) -> dict:
+    out = {}
+    for p in pairs:
+        k, sep, v = p.partition("=")
+        if not sep or not k:
+            raise SystemExit(f"jev-ask: option needs key=description, got {p!r}")
+        out[k] = v
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--purpose", default="adhoc", help="label for the log / circuit breaker")
+    ap.add_argument("--deadline", type=int, default=800, help="hard cap in ms")
+    ap.add_argument("--state-file")
+    ap.add_argument("--questions-file", help="JSON object of questions, TypeSafe format")
+    ap.add_argument("--noul", nargs=2, action="append", default=[], metavar=("NAME", "INSTRUCTIONS"))
+    ap.add_argument("--choice", nargs="+", action="append", default=[], metavar="NAME INSTRUCTIONS k=desc...")
+    ap.add_argument("--score", nargs="+", action="append", default=[], metavar="NAME INSTRUCTIONS level0 level1...")
+    ap.add_argument("--no-mask", action="store_true")
+    args = ap.parse_args()
+
+    questions: dict = {}
+    if args.questions_file:
+        questions.update(json.loads(Path(args.questions_file).read_text()))
+    for name, instr in args.noul:
+        questions[name] = {"type": "noul", "instructions": instr}
+    for spec in args.choice:
+        if len(spec) < 4:
+            return ap.error("--choice needs NAME INSTRUCTIONS and at least two key=desc options")
+        questions[spec[0]] = {"type": "choice", "instructions": spec[1], "criteria": parse_kv(spec[2:])}
+    for spec in args.score:
+        if len(spec) < 4:
+            return ap.error("--score needs NAME INSTRUCTIONS and at least two levels")
+        questions[spec[0]] = {"type": "score", "instructions": spec[1], "criteria": spec[2:]}
+    if not questions:
+        ap.error("no questions given")
+
+    state = Path(args.state_file).read_text(errors="replace") if args.state_file else sys.stdin.read()
+    state = state[:MAX_STATE_CHARS]
+    if not args.no_mask:
+        state = mask(state)
+
+    started = time.perf_counter()
+    if os.environ.get("JEV_OFF", "").strip() in ("1", "true", "on"):
+        log(args.purpose, 0, "off"); return 3
+    if "[[jev:private]]" in state:
+        log(args.purpose, 0, "private_marker"); return 3
+    if circuit_open(args.purpose):
+        log(args.purpose, 0, "circuit_open"); return 3
+    key = api_key()
+    if not key:
+        log(args.purpose, 0, "no_key"); return 3
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["data"] = call(state, questions, args.deadline / 1000, key)
+        except Exception as e:  # noqa: BLE001
+            box["err"] = type(e).__name__ if not str(e).startswith("http_") else str(e)
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(args.deadline / 1000)
+    ms = int((time.perf_counter() - started) * 1000)
+    if "data" in box:
+        data = box["data"]
+        log(args.purpose, ms, "ok", (data.get("usage") or {}).get("input_tokens", "-"))
+        print(json.dumps(data.get("answers", {})))
+        return 0
+    log(args.purpose, ms, "deadline" if t.is_alive() else box.get("err", "error"))
+    return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main())

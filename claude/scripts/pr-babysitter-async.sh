@@ -9,6 +9,9 @@
 # authored the change resolves it — it knows what the code was meant to do.
 # A freshly spawned agent would be reading the diff cold.
 #
+# Org gate (mirrors pr-babysitter-hook.sh): only bevri-ai and teli-ai-llc PRs
+# get a poller. Any other org -> exit 0 immediately, nothing is set up.
+#
 # Exit codes: 0 = nothing to do / PR healthy or failed for other reasons
 #             2 = needs the session (merge conflict) -> rewake with stdout
 set -uo pipefail
@@ -22,6 +25,12 @@ echo "$CMD" | grep -q 'gh pr create' || exit 0
 URL=$(echo "$IN" | jq -r '.tool_response | tostring' 2>/dev/null \
       | grep -oE 'https://github\.com/[^/"]+/[^/"]+/pull/[0-9]+' | head -1)
 [ -z "$URL" ] && exit 0
+
+OWNER=$(echo "$URL" | sed -E 's#https://github.com/([^/]+)/.*#\1#')
+case "$OWNER" in
+  bevri-ai|teli-ai-llc) ;;   # babysit
+  *) exit 0 ;;               # anything else: no poller at all
+esac
 
 # Run the babysitter INLINE (not nohup'd) so its exit code is ours: the loop's
 # `handback_conflict` exits 2 and prints the resolution brief on stdout, which

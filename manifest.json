@@ -2,8 +2,10 @@
   "name": "My_Claude_Setup",
   "owner": "HAR5HA-7663",
   "exported": "2026-08-02",
-  "source_machine": "macOS (darwin 25.5.0), Claude Code with model claude-fable-5[1m]",
+  "updated": "2026-09-23",
+  "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.281",
   "install_doc": "INSTALL_AGENT.md",
+  "export_script": "export.py",
   "components": [
     {
       "id": "core-settings",
@@ -51,7 +53,7 @@
         },
         {
           "name": "brain-query",
-          "description": "Semantic two-tier retrieval over the personal brain at ~/brain/. Queries brain_wiki (synthesized pages) first, falls back to brain_raw (raw source chunks) if confidence…"
+          "description": "Semantic two-tier retrieval over the personal brain at ~/brain/. Queries brain_wiki (synthesized pages) first, falls back to brain_raw (raw source chunks) if confidence …"
         },
         {
           "name": "brain-status",
@@ -95,7 +97,7 @@
         },
         {
           "name": "frontend-design",
-          "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters,…"
+          "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, …"
         },
         {
           "name": "gsap-core",
@@ -131,15 +133,7 @@
         },
         {
           "name": "internal-comms",
-          "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to…"
-        },
-        {
-          "name": "job-applicator",
-          "description": "Personal job application assistant for Harsha Vardhan Yellela. Use this skill when the user asks to apply for jobs, submit applications on LinkedIn, Indeed, MigrateMate,…"
-        },
-        {
-          "name": "job-ranker",
-          "description": "Scrape jobs from a company careers page and rank them by fit for the user. Use when user provides a company careers URL and wants jobs analyzed and ranked. Outputs a CSV…"
+          "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to …"
         },
         {
           "name": "loopengg",
@@ -150,8 +144,16 @@
           "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building M…"
         },
         {
+          "name": "monday-triage",
+          "description": "Ticket hygiene for the Bevri BMYT board (or any Monday board / GitHub issue list). Exports the open tickets, lets Jev score severity, area, bug-vs-feature and missing re…"
+        },
+        {
+          "name": "morning-triage",
+          "description": "Morning message triage. Pulls the last ~14 hours of Slack (channels + DMs) and SMS, lets Jev score every message for needs-reply / urgency / kind / sensitivity in one ch…"
+        },
+        {
           "name": "motion-design",
-          "description": "Applies motion design principles to create emotionally-driven, technically sound animations and transitions. Provides timing, easing, choreography, and Disney animation…"
+          "description": ">"
         },
         {
           "name": "pdf",
@@ -175,7 +177,7 @@
         },
         {
           "name": "theme-factory",
-          "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that…"
+          "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that …"
         },
         {
           "name": "ui-styling",
@@ -187,7 +189,7 @@
         },
         {
           "name": "web-artifacts-builder",
-          "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex…"
+          "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex …"
         },
         {
           "name": "webapp-testing",
@@ -195,7 +197,7 @@
         },
         {
           "name": "wiki-ingest",
-          "description": "Ingest a file from ~/brain/raw/ into the wiki. Extract key concepts and entities, create or update pages in ~/brain/wiki/pages/, add cross-references, append to log.md.…"
+          "description": "Ingest a file from ~/brain/raw/ into the wiki. Extract key concepts and entities, create or update pages in ~/brain/wiki/pages/, add cross-references, append to log.md. …"
         },
         {
           "name": "wiki-lint",
@@ -236,7 +238,7 @@
     },
     {
       "id": "hook-scripts",
-      "label": "Hook scripts: malware guards (git push / npm install / git pull) + PR babysitter",
+      "label": "Hook + automation scripts (17) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
       "payload": [
         "claude/scripts/"
       ],
@@ -247,7 +249,72 @@
         "git",
         "gh CLI (PR babysitter only)"
       ],
-      "notes": "Wired up by hooks in settings.json. On Windows these need Git Bash; verify `bash` resolves in the hook environment."
+      "notes": "Wired from settings.json hooks and from launchd/. The Jev scripts need bin/jev-ask + TYPESAFE_API_KEY in ~/.env; everything fails open without it. The malware IOC data files (malware-ioc-canonical.txt, malware-ioc-bundle-exclude.txt, malware-guard-targets.txt) are NOT exported — sync-malware-iocs.py regenerates the guards from a local list.",
+      "items": [
+        "git-push-malware-guard.sh",
+        "headless-triage-run.sh",
+        "jev-bash-risk-gate.sh",
+        "jev-pr-risk.sh",
+        "jev-triage-messages.py",
+        "jev-triage-tickets.py",
+        "jev-verify-report",
+        "local-malware-postcheck.sh",
+        "local-malware-precheck.sh",
+        "malware-guard.canonical.sh",
+        "malware-host-sweep.sh",
+        "mem-guard.sh",
+        "pr-babysitter-async.sh",
+        "pr-babysitter-hook.sh",
+        "pr-babysitter.sh",
+        "sync-malware-iocs.py",
+        "tcc-clean-claude-residue.sh"
+      ]
+    },
+    {
+      "label": "CLI tools (6) — with-env / env-sync (universal ~/.env), jev-ask, jev-step, jab, jev-replicate",
+      "payload": [
+        "bin/"
+      ],
+      "target": "~/.local/bin/ (chmod +x; must be on PATH)",
+      "default": true,
+      "items": [
+        "env-sync",
+        "jab",
+        "jev-ask",
+        "jev-replicate",
+        "jev-step",
+        "with-env"
+      ],
+      "notes": "with-env reads ~/.env (mode 600, [owner] blocks) — create it with at least `[personal]\\nTYPESAFE_API_KEY=...`. jev-step/jab need agent-browser + hunch (`uv tool install hunch-browser` or from github.com/HAR5HA-7663/hunch).",
+      "id": "cli-tools"
+    },
+    {
+      "label": "Scheduled jobs (7, macOS launchd) — brain watcher/sync, daily brain sync, malware sweep, mem-guard, morning/monday triage",
+      "payload": [
+        "launchd/"
+      ],
+      "target": "~/Library/LaunchAgents/ then `launchctl load`",
+      "default": false,
+      "items": [
+        "com.harsha.brain-sync.plist",
+        "com.harsha.brain-watch.plist",
+        "com.harsha.daily-brain-sync.plist",
+        "com.harsha.malware-sweep.plist",
+        "com.harsha.mem-guard.plist",
+        "com.harsha.monday-triage.plist",
+        "com.harsha.morning-triage.plist"
+      ],
+      "notes": "Paths inside are /Users/HAR5HA — rewrite to the new home. Only ONE machine should run daily-brain-sync and the triage jobs. Linux: systemd user units; Windows: Task Scheduler.",
+      "id": "launchd-jobs"
+    },
+    {
+      "label": "Shell launcher — `claude` with function hooks (needed by the jev-compact plugin), `claude-plain`, `lawde`",
+      "payload": [
+        "shell/zshrc-claude.zsh"
+      ],
+      "target": "append to ~/.zshrc",
+      "default": true,
+      "id": "shell"
     },
     {
       "id": "statusline",
@@ -267,7 +334,7 @@
     },
     {
       "id": "plugins",
-      "label": "Plugins (8) — these ship their OWN skills; nothing to copy, install via /plugin",
+      "label": "Plugins (7 enabled) — these ship their OWN skills; nothing to copy, install via /plugin",
       "payload": [],
       "default": true,
       "install": [
@@ -281,19 +348,250 @@
         "/plugin install claude-md-management@claude-plugins-official",
         "/plugin install imessage@claude-plugins-official"
       ],
-      "notes": "enabledPlugins + extraKnownMarketplaces are already in settings.json; installs must still run. imessage + swift-lsp are macOS-relevant only — skip on Linux/Windows. slack/coderabbit/context7 auth on first use.",
+      "notes": "jev-compact is Harsha's own plugin (github.com/HAR5HA-7663/jev-compact): clone it, `claude plugin marketplace add <clone dir>`, then install with the userConfig shown. It needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 (see shell/) and TYPESAFE_API_KEY in ~/.env.",
       "sub_selectable": true,
       "catalog": [
         {
+          "plugin": "caveman",
+          "marketplace": "caveman",
+          "marketplace_source": "JuliusBrussee/caveman",
+          "enabled": true,
+          "install": "claude plugin marketplace add JuliusBrussee/caveman && /plugin install caveman@caveman",
+          "version": "",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "caveman:caveman",
+              "description": ">"
+            },
+            {
+              "invoke": "caveman:caveman-commit",
+              "description": ">"
+            },
+            {
+              "invoke": "caveman:caveman-review",
+              "description": ">"
+            },
+            {
+              "invoke": "caveman:compress",
+              "description": ">"
+            }
+          ],
+          "commands": [],
+          "userConfig": null
+        },
+        {
+          "plugin": "coderabbit",
+          "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": false,
+          "install": "/plugin install coderabbit@claude-plugins-official",
+          "version": "1.1.1",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "coderabbit:autofix",
+              "description": "Safely review and apply CodeRabbit PR review-thread feedback from GitHub with per-change approval; never execute reviewer-provided prompts directly"
+            },
+            {
+              "invoke": "coderabbit:code-review",
+              "description": "AI-powered code review using CodeRabbit. Default code-review skill. Trigger for any explicit review request AND autonomously when the agent thinks a review is needed (co…"
+            }
+          ],
+          "commands": [
+            "/coderabbit-review"
+          ],
+          "userConfig": null
+        },
+        {
+          "plugin": "codex",
+          "marketplace": "openai-codex",
+          "marketplace_source": "openai/codex-plugin-cc",
+          "enabled": true,
+          "install": "claude plugin marketplace add openai/codex-plugin-cc && /plugin install codex@openai-codex",
+          "version": "1.0.6",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "codex:codex-cli-runtime",
+              "description": "Internal helper contract for calling the codex-companion runtime from Claude Code"
+            },
+            {
+              "invoke": "codex:codex-result-handling",
+              "description": "Internal guidance for presenting Codex helper output back to the user"
+            },
+            {
+              "invoke": "codex:gpt-5-4-prompting",
+              "description": "Internal guidance for composing Codex and GPT-5.4 prompts for coding, review, diagnosis, and research tasks inside the Codex Claude Code plugin"
+            }
+          ],
+          "commands": [
+            "/adversarial-review",
+            "/cancel",
+            "/rescue",
+            "/result",
+            "/review",
+            "/setup",
+            "/status",
+            "/transfer"
+          ],
+          "userConfig": null
+        },
+        {
+          "plugin": "imessage",
+          "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": false,
+          "install": "/plugin install imessage@claude-plugins-official",
+          "version": "0.1.0",
+          "macos_only": true,
+          "skills": [
+            {
+              "invoke": "imessage:access",
+              "description": "Manage iMessage channel access — approve pairings, edit allowlists, set DM/group policy. Use when the user asks to pair, approve someone, check who's allowed, or change …"
+            },
+            {
+              "invoke": "imessage:configure",
+              "description": "Check iMessage channel setup and review access policy. Use when the user asks to configure iMessage, asks \"how do I set this up\" or \"who can reach me,\" or wants to know …"
+            }
+          ],
+          "commands": [],
+          "userConfig": null
+        },
+        {
+          "plugin": "jev-compact",
+          "marketplace": "jev-compact",
+          "marketplace_source": "<HOME>/Desktop/Personal/jev-compact (local clone — see the plugins notes)",
+          "enabled": true,
+          "install": "claude plugin marketplace add <HOME>/Desktop/Personal/jev-compact (local clone — see the plugins notes) && /plugin install jev-compact@jev-compact",
+          "version": "0.1.0",
+          "macos_only": false,
+          "skills": [],
+          "commands": [],
+          "userConfig": {
+            "targetPercent": 45,
+            "compactAtPercent": 75,
+            "preserveRecentMessages": 12,
+            "minReductionRatio": 0.25,
+            "brainArchive": true,
+            "model": "jev-1.13.0"
+          }
+        },
+        {
+          "plugin": "slack",
+          "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": true,
+          "install": "/plugin install slack@claude-plugins-official",
+          "version": "1.3.0",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "slack:block-kit",
+              "description": "Use when a developer wants to build or validate Block Kit layouts for Slack messages, modals, or Home tabs: message layouts, modals/forms/dialogs, Home tab interfaces, i…"
+            },
+            {
+              "invoke": "slack:create-slack-app",
+              "description": "Use when a developer wants to create, scaffold, or bootstrap a new Slack app or agent from scratch with the Slack CLI. Covers prerequisites, sandbox setup, authenticatio…"
+            },
+            {
+              "invoke": "slack:slack-api",
+              "description": "Use when a developer asks which Slack Web API method does something, needs a method's OAuth scopes or token type, wants to call or test a family.method endpoint (chat.po…"
+            },
+            {
+              "invoke": "slack:slack-cli",
+              "description": "Use when a developer works with the Slack CLI (slack command) to create, run, or manage a Slack app from the terminal: logging in or authenticating (slack login), adding…"
+            },
+            {
+              "invoke": "slack:slack-docs",
+              "description": "Use when answering a conceptual or how-to question about Slack platform features, or when asked to look up, fetch, or summarize a docs.slack.dev page, including a pasted…"
+            },
+            {
+              "invoke": "slack:slack-messaging",
+              "description": "Use when writing, drafting, scheduling, or improving a Slack message, announcement, or reply sent via the Slack MCP tools (slack_send_message, slack_send_message_draft, …"
+            },
+            {
+              "invoke": "slack:slack-search",
+              "description": "Use when locating messages, files, channels, or people across Slack, or gathering context before answering, with the search MCP tools (slack_search_public, slack_search_…"
+            },
+            {
+              "invoke": "slack:test-slack-app",
+              "description": "Use when a developer wants to test, try out, smoke-test, verify, or confirm that a Slack app built with the Slack CLI (or a plain Bolt app) actually works, by running it…"
+            }
+          ],
+          "commands": [
+            "/channel-digest",
+            "/draft-announcement",
+            "/find-discussions",
+            "/standup",
+            "/summarize-channel"
+          ],
+          "userConfig": null
+        },
+        {
+          "plugin": "stripe",
+          "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": true,
+          "install": "/plugin install stripe@claude-plugins-official",
+          "version": "0.9.2",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "stripe:connect-recommend",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:connect-required-verification-information",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-apps",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-best-practices",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-directory",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-docs",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-pay",
+              "description": ">-"
+            },
+            {
+              "invoke": "stripe:stripe-projects",
+              "description": ">"
+            },
+            {
+              "invoke": "stripe:upgrade-stripe",
+              "description": "Guide for upgrading Stripe API versions and SDKs"
+            }
+          ],
+          "commands": [
+            "/explain-error",
+            "/test-cards"
+          ],
+          "userConfig": null
+        },
+        {
           "plugin": "superpowers",
           "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": true,
           "install": "/plugin install superpowers@claude-plugins-official",
           "version": "6.3.0",
           "macos_only": false,
           "skills": [
             {
               "invoke": "superpowers:brainstorming",
-              "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user inten…"
+              "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and …"
             },
             {
               "invoke": "superpowers:dispatching-parallel-agents",
@@ -309,7 +607,7 @@
             },
             {
               "invoke": "superpowers:receiving-code-review",
-              "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires…"
+              "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and…"
             },
             {
               "invoke": "superpowers:requesting-code-review",
@@ -329,15 +627,15 @@
             },
             {
               "invoke": "superpowers:using-git-worktrees",
-              "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace e…"
+              "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native too…"
             },
             {
               "invoke": "superpowers:using-superpowers",
-              "description": "Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying ques…"
+              "description": "Use when starting any conversation - establishes how to find and use skills, requiring skill invocation before ANY response including clarifying questions"
             },
             {
               "invoke": "superpowers:verification-before-completion",
-              "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirmin…"
+              "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before maki…"
             },
             {
               "invoke": "superpowers:writing-plans",
@@ -348,173 +646,189 @@
               "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment"
             }
           ],
-          "commands": []
-        },
-        {
-          "plugin": "slack",
-          "marketplace": "claude-plugins-official",
-          "install": "/plugin install slack@claude-plugins-official",
-          "version": "1.2.0",
-          "macos_only": false,
-          "skills": [
-            {
-              "invoke": "slack:block-kit",
-              "description": "Help developers build and validate Block Kit layouts for Slack messages, modals, and Home tabs. Provides authoritative block references and validates…"
-            },
-            {
-              "invoke": "slack:create-slack-app",
-              "description": "Guide developers through creating a Slack app or agent using the Slack CLI and Bolt (JS or Python). Handles prerequisites, sandbox setup, authenticat…"
-            },
-            {
-              "invoke": "slack:slack-api",
-              "description": "Discover, navigate, and call Slack Web API methods (the family.method endpoints at slack.com/api like chat.postMessage, conversations.history, users.…"
-            },
-            {
-              "invoke": "slack:slack-cli",
-              "description": "Use the Slack CLI to create, run, and manage Slack apps from the terminal. Use whenever the developer wants to log in, add a team, switch workspaces,…"
-            },
-            {
-              "invoke": "slack:slack-docs",
-              "description": "Search and read the official Slack platform documentation at docs.slack.dev. Use this skill to answer conceptual or how-to questions about Slack feat…"
-            },
-            {
-              "invoke": "slack:slack-messaging",
-              "description": "Guidance for composing well-formatted, effective Slack messages using standard markdown"
-            },
-            {
-              "invoke": "slack:slack-search",
-              "description": "Guidance for effectively searching Slack to find messages, files, channels, and people"
-            }
-          ],
-          "commands": [
-            {
-              "invoke": "/slack:channel-digest",
-              "description": "Get a digest of recent activity across multiple Slack channels"
-            },
-            {
-              "invoke": "/slack:draft-announcement",
-              "description": "Draft a well-formatted Slack announcement and save it as a draft"
-            },
-            {
-              "invoke": "/slack:find-discussions",
-              "description": "Find discussions about a specific topic across Slack channels"
-            },
-            {
-              "invoke": "/slack:standup",
-              "description": "Generate a standup update based on your recent Slack activity"
-            },
-            {
-              "invoke": "/slack:summarize-channel",
-              "description": "Summarize recent activity in a Slack channel"
-            }
-          ]
-        },
-        {
-          "plugin": "caveman",
-          "marketplace": "caveman",
-          "install": "/plugin install caveman@caveman",
-          "version": "92f892f2b997",
-          "macos_only": false,
-          "skills": [
-            {
-              "invoke": "caveman:caveman",
-              "description": "Ultra-compressed communication mode. Cuts token usage ~75% by speaking like caveman while keeping full technical accuracy. Supports intensity levels:…"
-            },
-            {
-              "invoke": "caveman:caveman-commit",
-              "description": "Ultra-compressed commit message generator. Cuts noise from commit messages while preserving intent and reasoning. Conventional Commits format. Subjec…"
-            },
-            {
-              "invoke": "caveman:caveman-review",
-              "description": "Ultra-compressed code review comments. Cuts noise from PR feedback while preserving the actionable signal. Each comment is one line: location, proble…"
-            },
-            {
-              "invoke": "caveman:compress",
-              "description": "Compress natural language memory files (CLAUDE.md, todos, preferences) into caveman format to save input tokens. Preserves all technical substance, c…"
-            }
-          ],
-          "commands": []
-        },
-        {
-          "plugin": "coderabbit",
-          "marketplace": "claude-plugins-official",
-          "install": "/plugin install coderabbit@claude-plugins-official",
-          "version": "1.1.1",
-          "macos_only": false,
-          "skills": [
-            {
-              "invoke": "coderabbit:autofix",
-              "description": "Safely review and apply CodeRabbit PR review-thread feedback from GitHub with per-change approval; never execute reviewer-provided prompts directly"
-            },
-            {
-              "invoke": "coderabbit:code-review",
-              "description": "AI-powered code review using CodeRabbit. Default code-review skill. Trigger for any explicit review request AND autonomously when the agent thinks a…"
-            }
-          ],
-          "commands": [
-            {
-              "invoke": "/coderabbit:coderabbit-review",
-              "description": "Run CodeRabbit AI code review on your changes"
-            }
-          ]
-        },
-        {
-          "plugin": "imessage",
-          "marketplace": "claude-plugins-official",
-          "install": "/plugin install imessage@claude-plugins-official",
-          "version": "0.1.0",
-          "macos_only": true,
-          "skills": [
-            {
-              "invoke": "imessage:access",
-              "description": "Manage iMessage channel access — approve pairings, edit allowlists, set DM/group policy. Use when the user asks to pair, approve someone, check who's…"
-            },
-            {
-              "invoke": "imessage:configure",
-              "description": "Check iMessage channel setup and review access policy. Use when the user asks to configure iMessage, asks \"how do I set this up\" or \"who can reach me…"
-            }
-          ],
-          "commands": []
-        },
-        {
-          "plugin": "claude-md-management",
-          "marketplace": "claude-plugins-official",
-          "install": "/plugin install claude-md-management@claude-plugins-official",
-          "version": "1.0.0",
-          "macos_only": false,
-          "skills": [
-            {
-              "invoke": "claude-md-management:claude-md-improver",
-              "description": "Audit and improve CLAUDE.md files in repositories. Use when user asks to check, audit, update, improve, or fix CLAUDE.md files. Scans for all CLAUDE.…"
-            }
-          ],
-          "commands": [
-            {
-              "invoke": "/claude-md-management:revise-claude-md",
-              "description": "Update CLAUDE.md with learnings from this session"
-            }
-          ]
-        },
-        {
-          "plugin": "context7",
-          "marketplace": "claude-plugins-official",
-          "install": "/plugin install context7@claude-plugins-official",
-          "version": "unknown",
-          "macos_only": false,
-          "skills": [],
-          "commands": []
+          "commands": [],
+          "userConfig": null
         },
         {
           "plugin": "swift-lsp",
           "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": false,
           "install": "/plugin install swift-lsp@claude-plugins-official",
-          "version": "1.0.0",
+          "version": "",
           "macos_only": true,
           "skills": [],
-          "commands": []
+          "commands": [],
+          "userConfig": null
+        },
+        {
+          "plugin": "vercel",
+          "marketplace": "claude-plugins-official",
+          "marketplace_source": "anthropics/claude-plugins-official",
+          "enabled": true,
+          "install": "/plugin install vercel@claude-plugins-official",
+          "version": "0.49.2",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "vercel:access-protected-vercel-deployment",
+              "description": "Access and test Vercel deployments protected by Vercel Authentication, SSO, or Deployment Protection. Use when curl, agent-browser, Playwright, or another automated requ…"
+            },
+            {
+              "invoke": "vercel:ai-gateway",
+              "description": "Vercel AI Gateway guidance for setup, model discovery, authentication, routing, fallbacks, BYOK, budgets, spend reporting, observability, compatible APIs, and coding-age…"
+            },
+            {
+              "invoke": "vercel:ai-sdk",
+              "description": "Vercel AI SDK expert guidance. Use when building AI-powered features — chat interfaces, text generation, structured output, tool calling, agents, MCP integration, stream…"
+            },
+            {
+              "invoke": "vercel:auth",
+              "description": "Authentication integration guidance — Clerk (native Vercel Marketplace), Descope, and Auth0 setup for Next.js applications. Covers middleware auth patterns, sign-in/sign…"
+            },
+            {
+              "invoke": "vercel:bootstrap",
+              "description": "Project bootstrapping orchestrator for repos that depend on Vercel-linked resources (databases, auth, and managed integrations). Use when setting up or repairing a repos…"
+            },
+            {
+              "invoke": "vercel:build-agents",
+              "description": "Default guidance for building AI agents. Use for generic requests to build, create, scaffold, design, architect, or implement an AI agent, agent app, tool-calling agent,…"
+            },
+            {
+              "invoke": "vercel:cdn-caching",
+              "description": "Debug Vercel CDN caching — cache hit rate, stale content, revalidation behavior, ISR + PPR, per-request cache reasons (cacheReason) and PPR state (ppr_state), and costs."
+            },
+            {
+              "invoke": "vercel:chat-sdk",
+              "description": "Vercel Chat SDK expert guidance. Use when building multi-platform chat bots — Slack, Telegram, Microsoft Teams, Discord, Google Chat, GitHub, Linear — with a single code…"
+            },
+            {
+              "invoke": "vercel:create-a-backend",
+              "description": "Backend architecture guidance. Use when planning, building, or migrating an API or backend; choosing between Functions, Services, containers, Workflow, Queues, and Marke…"
+            },
+            {
+              "invoke": "vercel:deployments-cicd",
+              "description": "Vercel deployment and CI/CD expert guidance. Use when deploying, promoting, rolling back, inspecting deployments, building with --prebuilt, or configuring CI workflow fi…"
+            },
+            {
+              "invoke": "vercel:env-vars",
+              "description": "Vercel environment variable expert guidance. Use when working with .env files, vercel env commands, OIDC tokens, or managing environment-specific configuration."
+            },
+            {
+              "invoke": "vercel:eve",
+              "description": "eve framework guidance for durable AI agents and agent-powered applications. Use when creating, editing, or debugging an eve project, when the user explicitly asks for e…"
+            },
+            {
+              "invoke": "vercel:flags-sdk",
+              "description": "Set up and use feature flags and A/B tests with the Flags SDK (`flags` npm package) and Vercel Flags. Use when installing or configuring the SDK, adding a new or existin…"
+            },
+            {
+              "invoke": "vercel:knowledge-update",
+              "description": "Corrects outdated LLM knowledge about the Vercel platform and introduces new products. Injected at session start."
+            },
+            {
+              "invoke": "vercel:marketplace",
+              "description": "Vercel Marketplace expert guidance — discovering, installing, and managing third-party integrations via the `vercel integration` CLI. Use when building any app that need…"
+            },
+            {
+              "invoke": "vercel:microfrontends",
+              "description": "Guide for building, configuring, and deploying microfrontends on Vercel. Use this skill when the user mentions microfrontends, multi-zones, splitting an app across teams…"
+            },
+            {
+              "invoke": "vercel:next-cache-components",
+              "description": "Next.js 16 Cache Components guidance — PPR, use cache directive, cacheLife, cacheTag, updateTag, and migration from unstable_cache. Use when implementing partial prerend…"
+            },
+            {
+              "invoke": "vercel:next-forge",
+              "description": "next-forge expert guidance — production-grade Turborepo monorepo SaaS starter by Vercel. Use when working in a next-forge project, scaffolding with `npx next-forge init`…"
+            },
+            {
+              "invoke": "vercel:next-upgrade",
+              "description": "Upgrade Next.js to the latest version following official migration guides and codemods. Use when upgrading Next.js versions, running codemods, or migrating between major…"
+            },
+            {
+              "invoke": "vercel:nextjs",
+              "description": "Next.js App Router expert guidance. Use when building, debugging, or architecting Next.js applications — routing, Server Components, Server Actions, Cache Components, la…"
+            },
+            {
+              "invoke": "vercel:react-best-practices",
+              "description": "React best-practices reviewer for TSX files. Triggers after editing multiple TSX components to run a condensed quality checklist covering component structure, hooks usag…"
+            },
+            {
+              "invoke": "vercel:routing-middleware",
+              "description": "Vercel Routing Middleware guidance — request interception before cache, rewrites, redirects, personalization. Works with any framework. Supports Edge, Node.js, and Bun r…"
+            },
+            {
+              "invoke": "vercel:runtime-cache",
+              "description": "Vercel Runtime Cache API guidance — ephemeral per-region key-value cache with tag-based invalidation. Shared across Functions, Routing Middleware, and Builds. Use when i…"
+            },
+            {
+              "invoke": "vercel:shadcn",
+              "description": "shadcn/ui expert guidance — CLI, component installation, composition patterns, custom registries, theming, Tailwind CSS integration, and high-quality interface design. U…"
+            },
+            {
+              "invoke": "vercel:turbopack",
+              "description": "Turbopack expert guidance. Use when configuring the Next.js bundler, optimizing HMR, debugging build issues, or understanding the Turbopack vs Webpack differences."
+            },
+            {
+              "invoke": "vercel:vercel-agent",
+              "description": "Vercel Agent guidance — AI-powered code review, incident investigation, and SDK installation. Automates PR analysis and anomaly debugging. Use when configuring or unders…"
+            },
+            {
+              "invoke": "vercel:vercel-cli",
+              "description": "Vercel CLI expert guidance. Use when deploying, managing environment variables, linking projects, viewing logs, querying metrics, managing domains, managing feature flag…"
+            },
+            {
+              "invoke": "vercel:vercel-connect",
+              "description": "Vercel Connect expert guidance — securely obtain scoped OAuth tokens for third-party services (Slack, GitHub, MCP servers, OAuth, Snowflake) on behalf of apps or users v…"
+            },
+            {
+              "invoke": "vercel:vercel-firewall",
+              "description": "Vercel Firewall expert guidance — automatic DDoS mitigation, the Vercel WAF (custom rules, IP blocking, managed rulesets, rate limiting), Attack Mode, system bypass, bot…"
+            },
+            {
+              "invoke": "vercel:vercel-functions",
+              "description": "Vercel Functions expert guidance — Node.js/Bun/Python runtimes, Fluid Compute, long-duration (30 min) functions, large functions (5 GB bundles), Docker/OCI container ima…"
+            },
+            {
+              "invoke": "vercel:vercel-sandbox",
+              "description": "Vercel Sandbox guidance — ephemeral Firecracker microVMs for running untrusted code safely. Supports AI agents, code generation, and experimentation. Use when executing …"
+            },
+            {
+              "invoke": "vercel:vercel-services",
+              "description": "Configure and troubleshoot Vercel Services for multiple frontends and backends in one project. Use when composing a polyglot or multi-service application on one Vercel d…"
+            },
+            {
+              "invoke": "vercel:vercel-storage",
+              "description": "Vercel storage expert guidance — Blob, Global Config (formerly Edge Config), and Marketplace storage (Neon Postgres, Upstash Redis). Use when choosing, configuring, or u…"
+            },
+            {
+              "invoke": "vercel:verification",
+              "description": "Full-story verification — infers what the user is building, then verifies the complete flow end-to-end: browser → API → data → response. Triggers on dev server start and…"
+            },
+            {
+              "invoke": "vercel:workflow",
+              "description": "Vercel Workflow SDK expert guidance. Use when building durable workflows, long-running tasks, API routes or agents that need pause/resume, retries, step-based execution,…"
+            }
+          ],
+          "commands": [
+            "/_conventions",
+            "/bootstrap",
+            "/deploy",
+            "/env",
+            "/status"
+          ],
+          "userConfig": null
         }
       ],
-      "selection": "REQUIRED: sub-select. These skills are NOT in claude/skills/ — they arrive with the plugin. Show the user each plugin's skill list and install only the plugins whose skills they want."
+      "selection": "REQUIRED: sub-select. These skills are NOT in claude/skills/ — they arrive with the plugin. Show the user each plugin's skill list and install only the plugins whose skills they want.",
+      "target": null,
+      "marketplaces": {
+        "claude-plugins-official": "anthropics/claude-plugins-official",
+        "caveman": "JuliusBrussee/caveman",
+        "openai-codex": "openai/codex-plugin-cc",
+        "jev-compact": "<HOME>/Desktop/Personal/jev-compact (local clone — see the plugins notes)"
+      }
     },
     {
       "id": "mcp-servers",
@@ -543,11 +857,13 @@
       "notes": "Private data; user must copy ~/brain from the old machine themselves (AirDrop/rsync/drive). Until then: SessionStart hook, brain-fs MCP, and brain/wiki skills will no-op or error — installer should skip or comment those out if brain is absent."
     }
   ],
-  "updated": "2026-08-13",
   "counts": {
     "personal_skills": 44,
-    "plugins": 8,
-    "plugin_skills": 30,
-    "plugin_commands": 7
+    "plugins": 7,
+    "plugin_skills": 73,
+    "plugin_commands": 20,
+    "hook_scripts": 17,
+    "cli_tools": 6,
+    "launchd_jobs": 7
   }
 }

@@ -1,0 +1,6 @@
+#!/bin/sh
+# jev-step is now `hunch` (github.com/HAR5HA-7663/hunch, source in ~/Desktop/Personal/hunch).
+# This wrapper keeps the old name working and pulls the Jev key from the universal ~/.env.
+: "${HUNCH_KEY_CMD:=$HOME/.local/bin/with-env -q --only TYPESAFE_API_KEY printenv TYPESAFE_API_KEY}"
+export HUNCH_KEY_CMD
+exec hunch "$@"
