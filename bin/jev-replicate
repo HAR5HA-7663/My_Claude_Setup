@@ -66,7 +66,11 @@ if [ -n "$CL" ]; then
   V=$("$CL" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if [ "$(printf '%s\n2.1.274\n' "$V" | sort -V | head -1)" = "2.1.274" ]; then
     "$CL" plugin marketplace list 2>/dev/null | grep -q 'jev-compact' || "$CL" plugin marketplace add ~/Desktop/Personal/jev-compact >/dev/null 2>&1 && echo "  marketplace jev-compact registered"
+    "$CL" plugin marketplace update jev-compact >/dev/null 2>&1 || true
     "$CL" plugin install jev-compact@jev-compact --config targetPercent=45 --config compactAtPercent=75 --config preserveRecentMessages=12 --config minReductionRatio=0.25 --config model=jev-1.13.0 --config brainArchive=true 2>&1 | tail -1
+    # companion trigger plugin: the engine skips a plugin's own session.compact hook when that
+    # plugin raises the compaction, so the auto-trigger has to come from a second plugin
+    "$CL" plugin install jev-compact-trigger@jev-compact --config compactAtPercent=75 2>&1 | tail -1
     "$CL" plugin disable fast-jev-compaction@fast-jev-compaction >/dev/null 2>&1 || true
     # the flag must live in settings.json env: sessions started by the desktop app or the
     # `claude agents` daemon never go through the shell function (found 2026-09-24)

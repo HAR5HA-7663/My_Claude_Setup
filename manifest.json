@@ -289,7 +289,7 @@
     },
     {
       "id": "plugins",
-      "label": "Plugins (7 enabled) — these ship their OWN skills; nothing to copy, install via /plugin",
+      "label": "Plugins (8 enabled) — these ship their OWN skills; nothing to copy, install via /plugin",
       "payload": [],
       "default": true,
       "install": [
@@ -412,6 +412,20 @@
           ],
           "commands": [],
           "userConfig": null
+        },
+        {
+          "plugin": "jev-compact-trigger",
+          "marketplace": "jev-compact",
+          "marketplace_source": "<HOME>/Desktop/Personal/jev-compact (local clone — see the plugins notes)",
+          "enabled": true,
+          "install": "claude plugin marketplace add <HOME>/Desktop/Personal/jev-compact (local clone — see the plugins notes) && /plugin install jev-compact-trigger@jev-compact",
+          "version": "0.1.1",
+          "macos_only": false,
+          "skills": [],
+          "commands": [],
+          "userConfig": {
+            "compactAtPercent": 75
+          }
         },
         {
           "plugin": "jev-compact",
@@ -815,7 +829,7 @@
   "counts": {
     "personal_skills": 28,
     "personal_skills_disabled_not_exported": 16,
-    "plugins": 7,
+    "plugins": 8,
     "plugin_skills": 73,
     "plugin_commands": 20,
     "hook_scripts": 17,

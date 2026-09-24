@@ -125,7 +125,8 @@
     "codex@openai-codex": true,
     "stripe@claude-plugins-official": true,
     "vercel@claude-plugins-official": true,
-    "jev-compact@jev-compact": true
+    "jev-compact@jev-compact": true,
+    "jev-compact-trigger@jev-compact": true
   },
   "extraKnownMarketplaces": {
     "caveman": {
@@ -159,6 +160,11 @@
         "minReductionRatio": 0.25,
         "brainArchive": true,
         "model": "jev-1.13.0"
+      }
+    },
+    "jev-compact-trigger@jev-compact": {
+      "options": {
+        "compactAtPercent": 75
       }
     }
   },
