@@ -2,7 +2,7 @@
   "name": "My_Claude_Setup",
   "owner": "HAR5HA-7663",
   "exported": "2026-08-02",
-  "updated": "2026-09-23",
+  "updated": "2026-09-24",
   "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.281",
   "install_doc": "INSTALL_AGENT.md",
   "export_script": "export.py",

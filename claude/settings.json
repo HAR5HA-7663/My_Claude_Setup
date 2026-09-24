@@ -2,7 +2,8 @@
   "env": {
     "AGENT_BROWSER_HEADED": "1",
     "AGENT_BROWSER_EXECUTABLE_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "AGENT_BROWSER_PROFILE": "/Users/HAR5HA/.agent-browser/chrome-automation"
+    "AGENT_BROWSER_PROFILE": "/Users/HAR5HA/.agent-browser/chrome-automation",
+    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1"
   },
   "permissions": {
     "allow": [
