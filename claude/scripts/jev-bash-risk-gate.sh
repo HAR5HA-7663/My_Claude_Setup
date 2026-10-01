@@ -125,7 +125,11 @@ fi
 # servers (kill/pkill/agent-browser close), which hold nothing.
 DISPOSABLE_RE='((^|/)(tmp|temp|scratch[^/]*|scratchpad|node_modules|\.next|\.turbo|\.cache|dist|build|out|coverage|__pycache__|\.pytest_cache|logs?|worktrees)(/|$)|^/private/tmp/|^/tmp/|/\.claude/jobs/[^/]+/tmp(/|$)|\.(log|tmp|bak[^/]*|pyc)$)'
 if [ "$KIND" = "destructive_fs" ]; then
-  rm_targets=$(printf '%s' "$CMD" | tr ';&|' '\n\n\n' | grep -E '^[[:space:]]*rm[[:space:]]' | sed -E 's/^[[:space:]]*rm[[:space:]]+//; s/(^|[[:space:]])-[a-zA-Z-]+//g' | tr ' ' '\n' | grep -vE '^$' | sed -E "s#^~#$HOME#" | while IFS= read -r t; do case "$t" in /*) printf '%s\n' "$t";; *) printf '%s\n' "$CWD/$t";; esac; done | python3 -c 'import os,sys; [print(os.path.normpath(l.rstrip("\n"))) for l in sys.stdin]' 2>/dev/null)
+  rm_targets=$(printf '%s' "$CMD" | tr ';&|' '\n\n\n' | grep -E '^[[:space:]]*rm[[:space:]]' | sed -E 's/^[[:space:]]*rm[[:space:]]+//; s/(^|[[:space:]])-[a-zA-Z-]+//g' | tr ' ' '\n' | grep -vE '^$' | CWD="$CWD" python3 -c 'import os,sys
+cwd=os.environ.get("CWD","/")
+for l in sys.stdin:
+    t=os.path.expanduser(l.strip().strip("\x27\x22"))
+    if t: print(os.path.normpath(t if t.startswith("/") else os.path.join(cwd,t)))' 2>/dev/null)
   other_destructive=0; printf '%s' "$CMD" | grep -qE '(^|[;&|[:space:]])(rm|mv|dd|truncate|shred|git (clean|checkout -- |restore)|psql|mysql|gcloud [a-z ]*delete|aws [a-z0-9 -]*delete|DROP |DELETE FROM|TRUNCATE )' && other_destructive=1
   if [ -n "$rm_targets" ] && ! printf '%s\n' "$rm_targets" | grep -vqE "$DISPOSABLE_RE"; then
     rest=$(printf '%s' "$CMD" | tr ';&|' '\n\n\n' | grep -vE '^[[:space:]]*rm[[:space:]]')

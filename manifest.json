@@ -193,7 +193,7 @@
     },
     {
       "id": "hook-scripts",
-      "label": "Hook + automation scripts (20) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
+      "label": "Hook + automation scripts (17) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
       "payload": [
         "claude/scripts/"
       ],
@@ -221,9 +221,6 @@
         "pr-babysitter-async.sh",
         "pr-babysitter-hook.sh",
         "pr-babysitter.sh",
-        "pr-review-bot.sh",
-        "pr-review-sweep.sh",
-        "pr-review-watch-async.sh",
         "sync-malware-iocs.py",
         "tcc-clean-claude-residue.sh"
       ]
@@ -856,7 +853,7 @@
     "plugins": 9,
     "plugin_skills": 75,
     "plugin_commands": 20,
-    "hook_scripts": 20,
+    "hook_scripts": 17,
     "cli_tools": 6,
     "launchd_jobs": 7
   }

@@ -436,7 +436,7 @@ esac
 # ============================== sweep (launchd) ==============================
 # PR review sweeper (launchd com.harsha.pr-babysitter-sweep, every 5 min; added 2026-10-01).
 #
-# The review loop (pr-review-bot.sh) normally runs inside the Claude Code chat that
+# The review loop (review mode above) normally runs inside the Claude Code chat that
 # opened the PR: its asyncRewake watcher wakes that chat when Alex / Pranta answer.
 # If that chat is gone (closed, crashed, not in `claude agents`), the watcher died
 # with it. This sweeper covers that gap:

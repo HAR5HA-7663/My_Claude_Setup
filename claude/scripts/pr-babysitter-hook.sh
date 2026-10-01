@@ -2,7 +2,7 @@
 # PostToolUse launcher. When a `gh pr create` just ran, routes by GitHub org:
 #
 #   bevri-ai     -> ready-for-review + auto-merge + review request to
-#                   @teli_review_bot on Telegram (pr-review-bot.sh) + babysitter.
+#                   @teli_review_bot on Telegram (pr-babysitter.sh review) + babysitter.
 #                   Slack group DM C0BLMCYP95Y only as a fallback / after the
 #                   bot sent it back MAX_BOT_ROUNDS times (tags Arbaaz).
 #   teli-ai-llc  -> ready-for-review + auto-merge + Slack DM approval request
@@ -88,21 +88,21 @@ fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') $OWNER_REPO#$PRNUM: route=$ROUTE; $READY_NOTE; $AM_NOTE; $RISK_NOTE" >> "$HLOG"
 
 # NOTE: the babysitter itself is NOT launched here. It runs as a separate
-# asyncRewake hook (pr-babysitter-async.sh, same org gate) so that a merge
+#asyncRewake hook (pr-babysitter-async.sh, same org gate) so that a merge
 # conflict can wake THIS session — the one that authored the PR and therefore
 # knows what the change meant — instead of being resolved blind by a detached
 # process.
 
 # --- bevri: ask @teli_review_bot on Telegram instead of the Slack group (2026-10-01) ---
-# pr-review-bot.sh sends "PR <n> <repo>" as Harsha via the tg CLI; the asyncRewake
-# watcher (pr-review-watch-async.sh) wakes this session if the bot sends it back.
+# pr-babysitter.sh review request sends "PR <n> <repo>" as Harsha via the tg CLI; theasyncRewake
+# watcher (pr-babysitter-async.sh) wakes this session if the bot sends it back.
 # After MAX_BOT_ROUNDS send-backs the loop escalates to the Slack group tagging Arbaaz.
 # If the Telegram send fails, fall through to the old Slack approval request.
 if [ "$ROUTE" = "bevri" ]; then
-  BOT_OUT=$(bash "$HOME/.claude/scripts/pr-review-bot.sh" request "$URL" 2>&1)
+  BOT_OUT=$(bash "$HOME/.claude/scripts/pr-babysitter.sh" review request "$URL" 2>&1)
   if echo "$BOT_OUT" | grep -q '^sent '; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') $OWNER_REPO#$PRNUM: review requested from @teli_review_bot (no Slack)" >> "$HLOG"
-    BOT_INSTR="A PR was just created: $URL ($OWNER_REPO #$PRNUM). This is a bevri PR. The approval request was already sent to @teli_review_bot on Telegram by the hook ($BOT_OUT). Do NOT post it in Slack. A background watcher will wake you if the bot requests changes — then fix them on the PR branch, push, and run 'pr-review-bot request $URL' to send it back. Mechanical steps already done by the hook: $READY_NOTE; $AM_NOTE. If one of those FAILED, retry it once yourself ('gh pr ready $PRNUM --repo $OWNER_REPO' / 'gh pr merge $PRNUM --repo $OWNER_REPO --auto --merge'); if it still fails, just report the failure — NEVER merge the PR directly yourself.$( [ "$RISKY" = "true" ] && echo " The Jev risk classifier flagged this PR ($RISK_FLAGS), so auto-merge was deliberately NOT armed — do not arm it yourself; tell Harsha it needs a manual merge after approval." )"
+    BOT_INSTR="A PR was just created: $URL ($OWNER_REPO #$PRNUM). This is a bevri PR. The approval request was already sent to @teli_review_bot on Telegram by the hook ($BOT_OUT). Do NOT post it in Slack. A background watcher will wake you if the bot requests changes — then fix them on the PR branch, push, and run 'bash ~/.claude/scripts/pr-babysitter.sh review request $URL' to send it back. Mechanical steps already done by the hook: $READY_NOTE; $AM_NOTE. If one of those FAILED, retry it once yourself ('gh pr ready $PRNUM --repo $OWNER_REPO' / 'gh pr merge $PRNUM --repo $OWNER_REPO --auto --merge'); if it still fails, just report the failure — NEVER merge the PR directly yourself.$( [ "$RISKY" = "true" ] && echo " The Jev risk classifier flagged this PR ($RISK_FLAGS), so auto-merge was deliberately NOT armed — do not arm it yourself; tell Harsha it needs a manual merge after approval." )"
     jq -n --arg url "$URL" --arg ready "$READY_NOTE" --arg am "$AM_NOTE" --arg risk "$RISK_NOTE" --arg instr "$BOT_INSTR" '{
       systemMessage: "PR babysitter launched for \($url) [bevri] — \($ready); \($am); \($risk); review requested from @teli_review_bot (Telegram); review watcher + checks watch running.",
       hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $instr}
@@ -113,10 +113,10 @@ if [ "$ROUTE" = "bevri" ]; then
 fi
 
 # --- teli: arm the GitHub review watcher for Pranta (2026-10-01) ---
-# The Slack DM below stays as the first ping; pr-review-watch-async.sh then wakes
+# The Slack DM below stays as the first ping; pr-babysitter-async.sh then wakes
 # this session on each of his reviews / PR comments until he approves.
 if [ "$ROUTE" = "teli" ]; then
-  bash "$HOME/.claude/scripts/pr-review-bot.sh" request "$URL" >>"$HLOG" 2>&1 \
+  bash "$HOME/.claude/scripts/pr-babysitter.sh" review request "$URL" >>"$HLOG" 2>&1 \
     || echo "$(date '+%Y-%m-%d %H:%M:%S') $OWNER_REPO#$PRNUM: review watcher arm FAILED" >> "$HLOG"
 fi
 

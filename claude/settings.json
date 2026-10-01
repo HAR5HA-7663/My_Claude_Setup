@@ -79,20 +79,11 @@
           {
             "type": "command",
             "command": "bash ~/.claude/scripts/pr-babysitter-async.sh",
-            "timeout": 1500,
-            "statusMessage": "Babysitting the new PR (base sync + checks)…",
-            "asyncRewake": true,
-            "rewakeMessage": "PR babysitter needs you — the PR you just opened has merge conflicts. Resolve them now, before other work:",
-            "rewakeSummary": "PR has merge conflicts — needs resolution"
-          },
-          {
-            "type": "command",
-            "command": "bash ~/.claude/scripts/pr-review-watch-async.sh",
             "timeout": 3600,
-            "statusMessage": "Watching for the PR review (Alex via bot / Pranta on GitHub)…",
+            "statusMessage": "Babysitting the PR (base sync, checks, review)…",
             "asyncRewake": true,
-            "rewakeMessage": "PR review loop needs you — act on this now:",
-            "rewakeSummary": "PR review loop update"
+            "rewakeMessage": "PR babysitter needs you — act on this now, before other work:",
+            "rewakeSummary": "PR babysitter: conflict or review feedback"
           }
         ]
       }
