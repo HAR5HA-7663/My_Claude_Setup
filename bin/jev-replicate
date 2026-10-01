@@ -18,6 +18,8 @@ KEY=$("$HOME/.local/bin/with-env" -q --only TYPESAFE_API_KEY printenv TYPESAFE_A
 if [ "$KIND" = "mac" ]; then
   say "CLI tools -> ~/.local/bin"
   eval $RS ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} "$TARGET:.local/bin/"
+  say "gate tuning -> ~/.config/jev-gate.env (if present)"
+  [ -f ~/.config/jev-gate.env ] && eval $RS ~/.config/jev-gate.env "$TARGET:.config/jev-gate.env"
   say "hooks + helper scripts -> ~/.claude/scripts"
   eval $RS ~/.claude/scripts/{jev-bash-risk-gate.sh,jev-pr-risk.sh,jev-verify-report,jev-triage-messages.py,jev-triage-tickets.py,headless-triage-run.sh,local-malware-precheck.sh,local-malware-postcheck.sh,pr-babysitter-hook.sh} "$TARGET:.claude/scripts/"
   say "skills"

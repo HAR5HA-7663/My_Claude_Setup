@@ -127,7 +127,7 @@ Small, fast judgement calls are delegated to [Jev](https://typesafe.ai) (TypeSaf
 | Piece | Where | What it does |
 |---|---|---|
 | `bin/jev-ask` | CLI | one-shot typed questions (noul / choice / score) with masking, deadline, circuit breaker, `JEV_OFF=1` |
-| Bash risk gate | `claude/scripts/jev-bash-risk-gate.sh` (PreToolUse Bash) | denies confident exfiltration / security downgrade / shared-branch rewrites, asks on sudo, curl-pipe-shell, risky deletes; read-only commands never leave the machine |
+| Bash risk gate | `claude/scripts/jev-bash-risk-gate.sh` (PreToolUse Bash), tuned by `config/jev-gate.env` | deterministic standing-allow for ordinary git/gh pushes and PRs, Slack/Telegram messages to the team, scratch-dir deletes and dev-server kills; denies secret material sent to an unknown host, security downgrades, force-push/reset/delete on shared branches; asks on sudo, curl-pipe-shell, deletes outside scratch roots; read-only commands never leave the machine |
 | PR risk pre-filter | `claude/scripts/jev-pr-risk.sh` inside the PR babysitter | billing / schema / auth / deploy-config PRs are announced but auto-merge is not armed |
 | `jev-verify-report` | `claude/scripts/` | accept / verify / reject a subagent report before spending a skeptic pass (used by the `loopengg` skill) |
 | Triage | `morning-triage`, `monday-triage` skills + `headless-triage-run.sh` + launchd | Slack/SMS and Monday-board hygiene digests, drafts only, never sends |

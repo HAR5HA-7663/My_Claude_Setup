@@ -128,6 +128,19 @@ def sync_claude_dir() -> None:
         rsync(C / "statusline", REPO / "claude/statusline", ["node_modules", ".DS_Store", "*.log"])
 
 
+def sync_config() -> None:
+    """Tuning files under ~/.config the hooks read (no secrets live there — a secret-looking line aborts the export)."""
+    say("config/ (hook tuning files)")
+    d = REPO / "config"
+    d.mkdir(exist_ok=True)
+    for name in ("jev-gate.env",):
+        src = HOME / ".config" / name
+        if src.exists():
+            shutil.copy2(src, d / name)
+        else:
+            say(f"  (not present here: {name})")
+
+
 def sync_bin() -> None:
     say("bin/ (CLI tools the hooks and skills call)")
     d = REPO / "bin"
@@ -277,8 +290,8 @@ def build_manifest() -> None:
         comp("agents", payload=["claude/agents/"]),
         comp("commands", payload=["claude/commands/"]),
         comp("hook-scripts", label=f"Hook + automation scripts ({len(scripts)}) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
-             payload=["claude/scripts/"], items=scripts,
-             notes="Wired from settings.json hooks and from launchd/. The Jev scripts need bin/jev-ask + TYPESAFE_API_KEY in ~/.env; everything fails open without it. "
+             payload=["claude/scripts/", "config/jev-gate.env"], items=scripts,
+             notes="config/jev-gate.env -> ~/.config/jev-gate.env tunes the Jev Bash risk gate (DENY_P, ASK_P, GATE_OFF, EXTRA_ALLOW_RE for commands that must never be judged). Wired from settings.json hooks and from launchd/. The Jev scripts need bin/jev-ask + TYPESAFE_API_KEY in ~/.env; everything fails open without it. "
                    "The malware IOC data files (malware-ioc-canonical.txt, malware-ioc-bundle-exclude.txt, malware-guard-targets.txt) are NOT exported — sync-malware-iocs.py regenerates the guards from a local list."),
         comp("cli-tools", label=f"CLI tools ({len(tools)}) — with-env / env-sync (universal ~/.env), jev-ask, jev-step, jab, jev-replicate",
              payload=["bin/"], target="~/.local/bin/ (chmod +x; must be on PATH)", default=True, items=tools,
@@ -356,6 +369,7 @@ def main() -> int:
         print("== export from live setup")
         sync_claude_dir()
         sync_bin()
+        sync_config()
         sync_launchd()
         sync_mcp()
         write_shell()

@@ -195,7 +195,8 @@
       "id": "hook-scripts",
       "label": "Hook + automation scripts (17) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
       "payload": [
-        "claude/scripts/"
+        "claude/scripts/",
+        "config/jev-gate.env"
       ],
       "target": "~/.claude/scripts/",
       "default": true,
@@ -204,7 +205,7 @@
         "git",
         "gh CLI (PR babysitter only)"
       ],
-      "notes": "Wired from settings.json hooks and from launchd/. The Jev scripts need bin/jev-ask + TYPESAFE_API_KEY in ~/.env; everything fails open without it. The malware IOC data files (malware-ioc-canonical.txt, malware-ioc-bundle-exclude.txt, malware-guard-targets.txt) are NOT exported — sync-malware-iocs.py regenerates the guards from a local list.",
+      "notes": "config/jev-gate.env -> ~/.config/jev-gate.env tunes the Jev Bash risk gate (DENY_P, ASK_P, GATE_OFF, EXTRA_ALLOW_RE for commands that must never be judged). Wired from settings.json hooks and from launchd/. The Jev scripts need bin/jev-ask + TYPESAFE_API_KEY in ~/.env; everything fails open without it. The malware IOC data files (malware-ioc-canonical.txt, malware-ioc-bundle-exclude.txt, malware-guard-targets.txt) are NOT exported — sync-malware-iocs.py regenerates the guards from a local list.",
       "items": [
         "git-push-malware-guard.sh",
         "headless-triage-run.sh",

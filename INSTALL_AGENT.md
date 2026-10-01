@@ -125,6 +125,7 @@ Copy `claude/commands/*.md` → `~/.claude/commands/`.
 2. They require `bash`, `git`, `python3`, `jq`, and (PR babysitter) `gh` authenticated. On Windows confirm hooks execute via Git Bash — run one manually as a smoke test.
 3. These are wired by the hooks block installed in core-settings (PreToolUse: git-push guard → local malware precheck → Jev risk gate; PostToolUse: malware postcheck, PR babysitter; SessionStart: brain context, TCC cleaner).
 4. The `jev-*` scripts need `bin/jev-ask` on PATH and `TYPESAFE_API_KEY` in `~/.env`; without them they fail open (no gate, no pre-filter) and say so in their logs under `~/.local/state/jev/`.
+   Copy `config/jev-gate.env` → `~/.config/jev-gate.env` as well: it holds the gate's thresholds and `EXTRA_ALLOW_RE` (commands never sent to Jev). Edit the regex for the user's own messaging CLIs / repos before installing; the shipped one names the source machine's review-bot flow.
 5. The malware IOC list is NOT in the repo. `sync-malware-iocs.py` expects `~/.claude/scripts/malware-ioc-canonical.txt` (one literal per line) — ask the user for it or the guards keep their built-in split patterns.
 
 ### cli-tools
