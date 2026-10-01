@@ -5,7 +5,9 @@
 #   mem-guard.sh watch    -> launchd tick: log metrics, and under pressure kill idle spares + notify
 #
 # Thresholds (override in ~/.config/mem-guard.env):
-#   PRESSURE_DENY=2        kern.memorystatus_vm_pressure_level: 1=normal 2=warn 4=critical
+#   PRESSURE_DENY=4        kern.memorystatus_vm_pressure_level: 1=normal 2=warn 4=critical (deny only at critical)
+#   PRESSURE_WARN=2        at warn (or any swap/compressor threshold) the hook ALLOWS the spawn and injects a warning;
+#                          the hook denies ONLY at kernel level 4 (critical). Swap/compressor thresholds only drive watch-mode notifications.
 #   SWAP_DENY_MB=2048      swap in use
 #   COMP_DENY_MB=9000      compressor size (5-6 GB is NORMAL on this 16 GB Mac; OOM came at 8.1 GB)
 #   AVAIL_CRIT_PCT=10      kern.memorystatus_level (% "available") below this = critical
@@ -13,7 +15,7 @@
 set -u
 STATE="$HOME/.local/state/mem-guard"; mkdir -p "$STATE"
 LOG="$STATE/mem-guard.log"
-PRESSURE_DENY=2; SWAP_DENY_MB=2048; COMP_DENY_MB=9000; AVAIL_CRIT_PCT=10
+PRESSURE_DENY=4; PRESSURE_WARN=2; SWAP_DENY_MB=2048; COMP_DENY_MB=9000; AVAIL_CRIT_PCT=10
 NOTIFY_THROTTLE_S=600; KILL_THROTTLE_S=300
 [ -f "$HOME/.config/mem-guard.env" ] && . "$HOME/.config/mem-guard.env"
 
@@ -62,8 +64,16 @@ case "${1:-status}" in
   hook)
     IN=$(cat)  # PreToolUse JSON on stdin
     metrics
-    if under_pressure; then
-      TOOL=$(printf '%s' "$IN" | /usr/bin/sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    TOOL=$(printf '%s' "$IN" | /usr/bin/sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    if [ "$LEVEL" -lt "$PRESSURE_DENY" ] && { under_pressure || [ "$LEVEL" -ge "$PRESSURE_WARN" ]; }; then
+      REASON="${REASON:-macOS pressure level $LEVEL}"
+      echo "$(date '+%F %T') HOOK warn tool=${TOOL:-?} lvl=$LEVEL free=${FREE_MB} comp=${COMP_MB} swap=${SWAP_MB}" >> "$LOG"
+      /usr/bin/python3 -c 'import json,sys;print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":sys.argv[1]}}))' \
+        "mem-guard: RAM is tight ($REASON; free ${FREE_MB}MB, compressor ${COMP_MB}MB, swap ${SWAP_MB}MB). Spawn allowed, but keep it to one cheap subagent (haiku/sonnet, effort low) and do the rest inline. Top: $(top_hogs 4)"
+      exit 0
+    fi
+    if [ "$LEVEL" -ge "$PRESSURE_DENY" ]; then
+      REASON="macOS pressure level $LEVEL = CRITICAL (kernel is about to start killing processes)"
       MSG="mem-guard: refusing to spawn ${TOOL:-subagent} — $REASON. RAM ${TOTAL_MB}MB, free ${FREE_MB}MB, compressor ${COMP_MB}MB, swap ${SWAP_MB}MB. Top: $(top_hogs 5)Free memory (close Chrome tabs / idle claude sessions, ) then retry, or do the work inline without subagents."
       echo "$(date '+%F %T') HOOK deny tool=${TOOL:-?} $REASON free=${FREE_MB} comp=${COMP_MB} swap=${SWAP_MB}" >> "$LOG"
       /usr/bin/python3 -c 'import json,sys;print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":sys.argv[1]}}))' "$MSG"

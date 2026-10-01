@@ -2,8 +2,8 @@
   "name": "My_Claude_Setup",
   "owner": "HAR5HA-7663",
   "exported": "2026-08-02",
-  "updated": "2026-09-24",
-  "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.281",
+  "updated": "2026-10-01",
+  "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.287",
   "install_doc": "INSTALL_AGENT.md",
   "export_script": "export.py",
   "components": [
@@ -193,7 +193,7 @@
     },
     {
       "id": "hook-scripts",
-      "label": "Hook + automation scripts (17) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
+      "label": "Hook + automation scripts (20) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
       "payload": [
         "claude/scripts/"
       ],
@@ -221,6 +221,9 @@
         "pr-babysitter-async.sh",
         "pr-babysitter-hook.sh",
         "pr-babysitter.sh",
+        "pr-review-bot.sh",
+        "pr-review-sweep.sh",
+        "pr-review-watch-async.sh",
         "sync-malware-iocs.py",
         "tcc-clean-claude-residue.sh"
       ]
@@ -289,7 +292,7 @@
     },
     {
       "id": "plugins",
-      "label": "Plugins (8 enabled) — these ship their OWN skills; nothing to copy, install via /plugin",
+      "label": "Plugins (9 enabled) — these ship their OWN skills; nothing to copy, install via /plugin",
       "payload": [],
       "default": true,
       "install": [
@@ -631,6 +634,27 @@
           "userConfig": null
         },
         {
+          "plugin": "telegram",
+          "marketplace": "anthropic-plugin-directory",
+          "marketplace_source": "",
+          "enabled": true,
+          "install": "claude plugin marketplace add anthropic-plugin-directory && /plugin install telegram@anthropic-plugin-directory",
+          "version": "0.0.7",
+          "macos_only": false,
+          "skills": [
+            {
+              "invoke": "telegram:access",
+              "description": "Manage Telegram channel access — approve pairings, edit allowlists, set DM/group policy. Use when the user asks to pair, approve someone, check who's allowed, or change …"
+            },
+            {
+              "invoke": "telegram:configure",
+              "description": "Set up the Telegram channel — save the bot token and review access policy. Use when the user pastes a Telegram bot token, asks to configure Telegram, asks \"how do I set …"
+            }
+          ],
+          "commands": [],
+          "userConfig": null
+        },
+        {
           "plugin": "vercel",
           "marketplace": "claude-plugins-official",
           "marketplace_source": "anthropics/claude-plugins-official",
@@ -829,10 +853,10 @@
   "counts": {
     "personal_skills": 28,
     "personal_skills_disabled_not_exported": 16,
-    "plugins": 8,
-    "plugin_skills": 73,
+    "plugins": 9,
+    "plugin_skills": 75,
     "plugin_commands": 20,
-    "hook_scripts": 17,
+    "hook_scripts": 20,
     "cli_tools": 6,
     "launchd_jobs": 7
   }

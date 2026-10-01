@@ -22,7 +22,6 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -85,6 +84,15 @@
             "asyncRewake": true,
             "rewakeMessage": "PR babysitter needs you — the PR you just opened has merge conflicts. Resolve them now, before other work:",
             "rewakeSummary": "PR has merge conflicts — needs resolution"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/pr-review-watch-async.sh",
+            "timeout": 3600,
+            "statusMessage": "Watching for the PR review (Alex via bot / Pranta on GitHub)…",
+            "asyncRewake": true,
+            "rewakeMessage": "PR review loop needs you — act on this now:",
+            "rewakeSummary": "PR review loop update"
           }
         ]
       }
@@ -126,7 +134,8 @@
     "stripe@claude-plugins-official": true,
     "vercel@claude-plugins-official": true,
     "jev-compact@jev-compact": true,
-    "jev-compact-trigger@jev-compact": true
+    "jev-compact-trigger@jev-compact": true,
+    "telegram@anthropic-plugin-directory": true
   },
   "extraKnownMarketplaces": {
     "caveman": {
