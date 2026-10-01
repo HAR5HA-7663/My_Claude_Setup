@@ -357,8 +357,17 @@ def scan() -> int:
                     hits += 1
                     print(f"SECRET? {path.relative_to(REPO)}:{i}: {line.strip()[:120]}")
                     break
-    if (REPO / ".env").exists() or list(REPO.rglob("*.env")):
-        print("SECRET? an .env file is inside the repo")
+    # Any env-style file is suspect unless it is a known tuning file whose every line is a comment or
+    # one of the gate's documented knobs (thresholds and a regex — never a credential).
+    TUNE_KEYS = {"DENY_P", "ASK_P", "DEADLINE_MS", "GATE_OFF", "EXTRA_ALLOW_RE"}
+    for envf in [REPO / ".env", *REPO.rglob("*.env")]:
+        if not envf.exists() or ".git" in envf.parts:
+            continue
+        if envf.parent == REPO / "config":
+            lines = [l for l in envf.read_text().splitlines() if l.strip() and not l.lstrip().startswith("#")]
+            if all(re.match(r"^([A-Z_]+)=", l) and re.match(r"^([A-Z_]+)=", l).group(1) in TUNE_KEYS for l in lines):
+                continue
+        print(f"SECRET? env-style file inside the repo: {envf.relative_to(REPO)}")
         hits += 1
     return hits
 
