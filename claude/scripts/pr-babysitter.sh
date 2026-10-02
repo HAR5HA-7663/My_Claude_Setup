@@ -115,8 +115,34 @@ If a genuine either/or decision is needed (two sides changed the same logic
 incompatibly), run 'git -C $DIR merge --abort' and ask Harsha instead of guessing.
 
 After committing the merge, push with: git -C $DIR push origin $HEAD
-Auto-merge is already armed, so the PR merges itself once checks pass and it is
-approved.
+Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request https://github.com/$OWNER/$REPO/pull/$PR
+That restarts the babysitter (checks, then the review). Do not start your own watchers.
+EOF
+  exit 2
+}
+
+# GitHub says the PR conflicts but there is no clean checkout of its branch to probe: hand the
+# conflict to the chat anyway (GitHub runs no CI on a conflicted PR, so waiting would hang forever).
+handback_conflict_remote() {
+  notify HANDBACK "conflicts with origin/$BASE — handed back to the session that opened the PR"
+  cat <<EOF
+PR #$PR ($OWNER/$REPO) has MERGE CONFLICTS with '$BASE' (GitHub: mergeable=$MERGEABLE, state=$MSTATUS).
+It cannot be reviewed or merged, and GitHub runs no CI on it until this is fixed. ($1.)
+
+You opened this PR, so you have the context — resolve it now, before other work, in the
+worktree/branch you opened it from ('$HEAD'):
+
+  git fetch origin
+  git merge origin/$BASE
+
+Resolve each conflict PRESERVING BOTH SIDES (keep the incoming '$BASE' changes AND this branch's).
+If it is a genuine either/or decision, run 'git merge --abort' and ask Harsha instead of guessing.
+Commit the merge, run the related tests, push the branch (never force-push), then run:
+
+  bash ~/.claude/scripts/pr-babysitter.sh review request https://github.com/$OWNER/$REPO/pull/$PR
+
+That restarts the babysitter (checks, then the review). The babysitter is watching this PR — do not
+start your own watchers or polling loops; it wakes you when there is something to do.
 EOF
   exit 2
 }
@@ -140,11 +166,18 @@ for i in $(seq 1 40); do   # 40 * 30s = up to 20 min
 
   # --- conflict-free base sync ---
   if [ "$MERGEABLE" = "CONFLICTING" ] || [ "$MSTATUS" = "BEHIND" ] || [ "$MSTATUS" = "DIRTY" ]; then
+    # The PR branch usually lives in a worktree (Bevri/tmp/worktrees/...), not the main checkout.
+    WT=$(git -C "$DIR" worktree list --porcelain 2>/dev/null | awk -v b="branch refs/heads/$HEAD" '/^worktree /{p=substr($0,10)} $0==b{print p; exit}')
+    [ -n "$WT" ] && DIR="$WT"
     CUR=$(git -C "$DIR" rev-parse --abbrev-ref HEAD)
+    CONFLICT=0; { [ "$MERGEABLE" = "CONFLICTING" ] || [ "$MSTATUS" = "DIRTY" ]; } && CONFLICT=1
     if [ "$CUR" != "$HEAD" ]; then
-      notify SKIP "local checkout is on '$CUR', PR head is '$HEAD' — not touching it"
+      # No checkout of the PR branch here: we can't sync it, but a real conflict must still reach the chat.
+      [ "$CONFLICT" = "1" ] && handback_conflict_remote "no local checkout or worktree of '$HEAD' was found"
+      [ -z "${SKIP_NOTED:-}" ] && { notify SKIP "no checkout of '$HEAD' here — not syncing it"; SKIP_NOTED=1; }
     elif [ -n "$(git -C "$DIR" status --porcelain)" ]; then
-      notify SKIP "working tree has uncommitted changes — not syncing (avoid stomping in-progress work)"
+      [ "$CONFLICT" = "1" ] && handback_conflict_remote "the worktree $DIR has uncommitted changes, so the babysitter did not touch it"
+      [ -z "${SKIP_NOTED:-}" ] && { notify SKIP "working tree has uncommitted changes — not syncing (avoid stomping in-progress work)"; SKIP_NOTED=1; }
     elif git -C "$DIR" merge "origin/$BASE" --no-edit >> "$LOG" 2>&1; then
       ioc_scan_and_push "merged origin/$BASE (conflict-free)" || exit 1
     else
@@ -235,6 +268,12 @@ log()  { echo "$(date '+%Y-%m-%d %H:%M:%S') $REPO#$PR $*" >> "$LOG"; }
 get()  { jq -r "$1" "$STATE"; }
 put()  { local t; t=$(mktemp "$DIR/.st.XXXX") && jq "$@" "$STATE" > "$t" && mv "$t" "$STATE"; }
 notify() { osascript -e "display notification \"$2\" with title \"PR babysitter · review · $REPO#$PR · $1\"" 2>/dev/null || true; }
+# Open code-scanning (CodeQL) alerts on the PR — posted by github-advanced-security[bot], which the
+# human-comment filters skip, and a failing "Code scanning results" check names no detail by itself.
+scan_alerts() {
+  gh api "repos/$OWNER/$REPO/code-scanning/alerts?ref=refs/pull/$PR/head&state=open&per_page=30" --jq '.[] |
+    "- [\(.rule.security_severity_level // .rule.severity)] \(.rule.id): \(.rule.description) — \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line) — \(.most_recent_instance.message.text) (\(.html_url))"' 2>/dev/null
+}
 # Telethon keeps its session in SQLite; two tg processes at once can hit "database is locked".
 tgr() { local i out; for i in 1 2 3; do out=$("$TG" "$@" 2>&1) && { printf '%s' "$out"; return 0; }; sleep $((i * 3)); done; printf '%s' "$out" >&2; return 1; }
 
@@ -300,6 +339,13 @@ Rules: keep <@$ARBAAZ_SLACK> literally (that is the @mention), keep the URL in a
 EOF
     exit 0
   fi
+  # One sender at a time; a forced (CI-green) send only if the PR is still waiting on CI.
+  SLOCK="$DIR/.send-$OWNER-$REPO-$PR.lock.d"
+  for _ in 1 2 3 4 5; do mkdir "$SLOCK" 2>/dev/null && break; sleep 2; done
+  trap 'rmdir "$SLOCK" 2>/dev/null' EXIT
+  if [ "${FORCE_SEND:-0}" = "1" ] && [ "$(get .status)" != "ci_pending" ]; then
+    echo "already sent (status=$(get .status))"; exit 0
+  fi
   OUT=$(tgr send "$BOT" "PR $PR $REPO") || { log "tg send FAILED: $OUT"; echo "FAILED to message $BOT: $OUT"; exit 1; }
   MID=$(echo "$OUT" | sed -nE 's/^sent id=([0-9]+).*/\1/p')
   if [ "$CIR" = "true" ]; then NEXT=$ROUNDS; [ "$NEXT" -lt 1 ] && NEXT=1; else NEXT=$((ROUNDS + 1)); fi
@@ -332,6 +378,12 @@ watch)
     sleep "$POLL_S"
     [ "${ONESHOT:-0}" = "1" ] || put --argjson t "$(date +%s)" '.heartbeat=$t'   # sweeper: a live watcher owns this PR
     ST=$(get .status)
+    # Merged or closed on GitHub = the loop is over (people merge by hand after approval, or close).
+    GHV=$(gh pr view "$PR" --repo "$OWNER/$REPO" --json state,mergeable --jq '.state+" "+.mergeable' 2>/dev/null)
+    GHS=${GHV%% *}; GHM=${GHV#* }
+    if [ "$GHS" = "MERGED" ] || [ "$GHS" = "CLOSED" ]; then
+      put --arg s "$(echo "$GHS" | tr 'A-Z' 'a-z')" '.status=$s | .brief_pending=false'; log "watch: PR is $GHS — loop finished"; exit 0
+    fi
     # ---- C/B: CI gate — the bot is only asked once checks are green
     if [ "$ST" = "ci_pending" ]; then
       CHK=$(gh pr checks "$PR" --repo "$OWNER/$REPO" 2>&1); CRC=$?
@@ -341,6 +393,23 @@ watch)
         echo "$R" | grep -q '^ESCALATE' && { echo "$R"; exit 2; }
         SENT_ID=$(get .last_sent_id); SENT_AT=$(get .sent_at); ROUND=$(get .rounds)
         continue
+      elif [ "$GHM" = "CONFLICTING" ] && [ "${CONFLICT_SENT:-}" != "1" ]; then
+        # GitHub runs no CI on a conflicted PR — the gate would wait forever. Tell the chat once.
+        CONFLICT_SENT=1
+        put --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status="conflict" | .since=$at'; log "watch: PR CONFLICTS with base — waking the chat"
+        notify CONFLICT "merge conflict — waking the PR's session"
+        cat <<EOF
+PR #$PR ($OWNER/$REPO) has MERGE CONFLICTS with its base branch, so GitHub runs no CI on it and it has
+NOT been sent to $WHO's review bot. Resolve it now, before other work, in the worktree/branch you opened it from:
+
+  git fetch origin && git merge origin/\$(gh pr view $PR --repo $OWNER/$REPO --json baseRefName --jq .baseRefName)
+
+Keep BOTH sides of every conflict; if it is a genuine either/or decision, 'git merge --abort' and ask Harsha.
+Commit, run the related tests, push (never force-push), then run:
+  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
+The babysitter is watching this PR — do not start your own watchers or polling loops.
+EOF
+        exit 2
       elif [ "$CRC" -eq 8 ]; then
         continue                                   # still running
       fi
@@ -351,6 +420,7 @@ A CI check on PR #$PR ($OWNER/$REPO) FAILED, so it has NOT been sent to $WHO's r
 
 Failing checks:
 $(echo "$CHK" | grep -iE 'fail|error|cancel' | head -20)
+$(A=$(scan_alerts); [ -n "$A" ] && printf '\nOpen code-scanning alerts on this PR (fix the code; dismiss only a genuine false positive, and say why):\n%s\n' "$A")
 
 You opened this PR, so you have the context. Do this now, before other work:
 1. Look at the failing run (gh pr checks $PR --repo $OWNER/$REPO, then gh run view <id> --log-failed) and fix the cause on the PR's own branch. If it is flaky/infra and not your change, re-run it (gh run rerun <id> --failed) instead.
@@ -489,6 +559,7 @@ $ISSUEC}
 ${INLINE:+
 Inline comments:
 $INLINE}
+$(A=$(scan_alerts); [ -n "$A" ] && printf '\nOpen code-scanning alerts on this PR:\n%s\n' "$A")
 
 You opened this PR, so you have the context. Do this now, before other work:
 1. Also read the PR yourself (gh pr view $PR --repo $OWNER/$REPO --comments, and the review threads) so nothing above is missed.
@@ -614,6 +685,16 @@ $brief"
   notify "${url##*/pull/}" "review feedback on $url — resumed its chat in claude agents"
   upd "$f" --argjson t "$NOW" '.brief_pending=false | .resumed_epoch=$t'
 }
+
+# Reconcile with GitHub: a merged/closed PR ends its loop (and must never get a stale brief).
+for f in "${FILES[@]}"; do
+  case "$(jq -r .status "$f")" in merged|closed|cancelled) continue ;; esac
+  ghs=$(gh pr view "$(jq -r .url "$f")" --json state --jq .state 2>/dev/null)
+  if [ "$ghs" = "MERGED" ] || [ "$ghs" = "CLOSED" ]; then
+    upd "$f" --arg s "$(echo "$ghs" | tr 'A-Z' 'a-z')" '.status=$s | .brief_pending=false'
+    log "$(jq -r .url "$f"): $ghs on GitHub — loop finished"
+  fi
+done
 
 DISPATCHED=0
 for f in "${FILES[@]}"; do

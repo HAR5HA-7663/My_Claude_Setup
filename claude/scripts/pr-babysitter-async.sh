@@ -37,7 +37,7 @@ SID=$(echo "$IN" | jq -r '.session_id // ""' 2>/dev/null)
 if [ -n "$SID" ]; then
   for f in "$HOME"/.claude/pr-babysitter/*.json; do
     [ -f "$f" ] || continue
-    jq -e --arg s "$SID" '.session_id == $s and .brief_pending == true and (.delivered_to // "") != $s and .status != "waiting"' "$f" >/dev/null 2>&1 || continue
+    jq -e --arg s "$SID" '.session_id == $s and .brief_pending == true and (.delivered_to // "") != $s and (.status | IN("waiting","ci_pending","merged","closed","cancelled") | not)' "$f" >/dev/null 2>&1 || continue
     t=$(mktemp "$f.XXXX") && jq --arg s "$SID" '.delivered_to = $s' "$f" > "$t" && mv "$t" "$f"
     echo "$(date '+%Y-%m-%d %H:%M:%S') $(jq -r '"\(.repo)#\(.pr)"' "$f") delivered saved review brief to chat $SID" >> "$HOME/.claude/pr-babysitter/loop.log"
     jq -r .brief "$f"; exit 2
