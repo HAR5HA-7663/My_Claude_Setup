@@ -3,7 +3,7 @@
   "owner": "HAR5HA-7663",
   "exported": "2026-08-02",
   "updated": "2026-10-02",
-  "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.287",
+  "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.288",
   "install_doc": "INSTALL_AGENT.md",
   "export_script": "export.py",
   "components": [
@@ -31,7 +31,7 @@
     },
     {
       "id": "skills",
-      "label": "Personal skills (28) — copied from this repo into ~/.claude/skills/",
+      "label": "Personal skills (29) — copied from this repo into ~/.claude/skills/",
       "payload": [
         "claude/skills/"
       ],
@@ -39,6 +39,10 @@
       "default": true,
       "sub_selectable": true,
       "items": [
+        {
+          "name": "archify",
+          "description": "Create polished, validated architecture, workflow, sequence, data-flow, and lifecycle/state diagrams as explorable standalone HTML with inline SVG, dark/light themes, op…"
+        },
         {
           "name": "brain-query",
           "description": "Semantic two-tier retrieval over the personal brain at ~/brain/. Queries brain_wiki (synthesized pages) first, falls back to brain_raw (raw source chunks) if confidence …"
@@ -193,7 +197,7 @@
     },
     {
       "id": "hook-scripts",
-      "label": "Hook + automation scripts (17) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
+      "label": "Hook + automation scripts (18) — malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard, TCC cleaner",
       "payload": [
         "claude/scripts/",
         "config/jev-gate.env"
@@ -222,6 +226,7 @@
         "pr-babysitter-async.sh",
         "pr-babysitter-hook.sh",
         "pr-babysitter.sh",
+        "pr-push-listen.mjs",
         "sync-malware-iocs.py",
         "tcc-clean-claude-residue.sh"
       ]
@@ -849,12 +854,12 @@
     }
   ],
   "counts": {
-    "personal_skills": 28,
+    "personal_skills": 29,
     "personal_skills_disabled_not_exported": 16,
     "plugins": 9,
     "plugin_skills": 75,
     "plugin_commands": 20,
-    "hook_scripts": 17,
+    "hook_scripts": 18,
     "cli_tools": 6,
     "launchd_jobs": 7
   }

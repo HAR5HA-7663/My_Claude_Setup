@@ -45,8 +45,26 @@ if [ -n "$SID" ]; then
 fi
 
 CREATED=0
+# --- the owning chat pushed new commits to a PR that was sent back -> resubmit automatically.
+# The chat no longer has to remember `review request`; a plain `git push` is enough.
+AUTO_URL=""
+if [ -n "$SID" ] && printf '%s\n' "$CMD" | grep -qE '(^|[;&|(]|&&)[[:space:]]*git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push\b'; then
+  sleep 3   # let GitHub register the push
+  for f in "$HOME"/.claude/pr-babysitter/*.json; do
+    [ -f "$f" ] || continue
+    jq -e --arg s "$SID" '.session_id == $s and (.status | IN("changes_requested","conflict","ci_failed"))' "$f" >/dev/null 2>&1 || continue
+    u=$(jq -r .url "$f"); old=$(jq -r '.head_sha // ""' "$f")
+    new=$(gh pr view "$u" --json headRefOid --jq .headRefOid 2>/dev/null)
+    { [ -n "$new" ] && [ "$new" != "$old" ]; } || continue
+    PR_SESSION_ID="$SID" bash "$SELF" review request "$u" >/dev/null 2>&1
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $(jq -r '"\(.repo)#\(.pr)"' "$f") push detected (${old:0:8} -> ${new:0:8}) — resubmitted automatically" >> "$HOME/.claude/pr-babysitter/loop.log"
+    AUTO_URL="$u"; break
+  done
+fi
 # Only a real `gh pr create` invocation, never a command that merely mentions it (see the sync hook).
-if printf '%s\n' "$CMD" | grep -qE '(^|[;&|(]|\$\(|&&|\|\|)[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create\b'; then
+if [ -n "$AUTO_URL" ]; then
+  URL="$AUTO_URL"; CREATED=1
+elif printf '%s\n' "$CMD" | grep -qE '(^|[;&|(]|\$\(|&&|\|\|)[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create\b'; then
   CREATED=1
   URL=$(echo "$IN" | jq -r '.tool_response | tostring' 2>/dev/null \
         | grep -oE 'https://github\.com/[^/"]+/[^/"]+/pull/[0-9]+' | head -1)

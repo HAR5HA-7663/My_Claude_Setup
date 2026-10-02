@@ -26,6 +26,10 @@ if [ "$KIND" = "mac" ]; then
   [ -f ~/.config/jev-gate.env ] && eval $RS ~/.config/jev-gate.env "$TARGET:.config/jev-gate.env"
   say "hooks + helper scripts -> ~/.claude/scripts"
   eval $RS ~/.claude/scripts/{jev-bash-risk-gate.sh,jev-pr-risk.sh,jev-verify-report,jev-triage-messages.py,jev-triage-tickets.py,headless-triage-run.sh,local-malware-precheck.sh,local-malware-postcheck.sh,pr-babysitter-hook.sh,pr-babysitter.sh,pr-babysitter-async.sh} "$TARGET:.claude/scripts/"
+  say "pr-push listener (GitHub webhook push via the pr-push Worker) + its subscriber token"
+  $SSH "$TARGET" 'mkdir -p ~/.config/pr-push && chmod 700 ~/.config/pr-push'
+  eval $RS ~/.claude/scripts/pr-push-listen.mjs "$TARGET:.claude/scripts/"
+  eval $RS ~/.config/pr-push/sub_token "$TARGET:.config/pr-push/"
   say "tg (Telethon user CLI, for the PR babysitter's review bot) -> ~/tools/tg + ~/.local/bin/tg"
   $SSH "$TARGET" 'mkdir -p ~/tools/tg'
   eval $RS ~/tools/tg/tg.py "$TARGET:tools/tg/"
@@ -99,6 +103,25 @@ cat > "$PL" <<PLIST
 </plist>
 PLIST
 launchctl unload "$PL" 2>/dev/null; launchctl load "$PL" && echo "  launchd com.harsha.pr-babysitter-sweep loaded"
+PL=~/Library/LaunchAgents/com.harsha.pr-push-listen.plist
+cat > "$PL" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.harsha.pr-push-listen</string>
+    <key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>$HOME/.claude/scripts/pr-push-listen.mjs</string></array>
+    <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin</string></dict>
+    <key>KeepAlive</key><true/>
+    <key>RunAtLoad</key><true/>
+    <key>ThrottleInterval</key><integer>10</integer>
+    <key>StandardOutPath</key><string>$HOME/.claude/pr-babysitter/push-launchd.log</string>
+    <key>StandardErrorPath</key><string>$HOME/.claude/pr-babysitter/push-launchd.log</string>
+</dict>
+</plist>
+PLIST
+chmod 600 ~/.config/pr-push/sub_token 2>/dev/null
+launchctl unload "$PL" 2>/dev/null; launchctl load "$PL" && echo "  launchd com.harsha.pr-push-listen loaded"
 # menu bar app (needs swiftc from the Xcode command line tools)
 if command -v swiftc >/dev/null 2>&1; then bash ~/tools/pr-babysitter-bar/build.sh 2>&1 | tail -1 | sed 's/^/  /'
 else echo "  swiftc not found — menu bar app skipped (xcode-select --install)"; fi

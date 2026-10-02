@@ -260,6 +260,17 @@ URL="https://github.com/$OWNER/$REPO/pull/$PR"
 if [ "$OWNER" = "teli-ai-llc" ]; then ORG=teli; WHO="Pranta"; MAX_WAIT_H=${MAX_WAIT_H_TELI:-24}
 else ORG=bevri; WHO="Alex"; fi
 STATE="$DIR/$OWNER-$REPO-$PR.json"
+# Push wake-up: pr-push-listen.mjs touches this file when GitHub reports a review / comment /
+# CI result for this PR, so the watcher polls right away instead of at the next tick.
+POKE="$DIR/.poke-$OWNER-$REPO-$PR"
+pwait() {   # <seconds> — sleep, but return early when the PR is poked
+  local end=$(( $(date +%s) + $1 )) m0
+  m0=$(stat -f %m "$POKE" 2>/dev/null || echo 0)
+  while [ "$(date +%s)" -lt "$end" ]; do
+    sleep 2
+    [ "$(stat -f %m "$POKE" 2>/dev/null || echo 0)" != "$m0" ] && return 0
+  done
+}
 [ -f "$STATE" ] || [ "$CMD" = "request" ] || { echo "no review loop for $OWNER/$REPO#$PR"; exit 0; }
 [ -f "$STATE" ] || jq -n --arg url "$URL" --arg repo "$REPO" --argjson pr "$PR" \
   '{url:$url, repo:$repo, pr:$pr, rounds:0, last_sent_id:0, sent_at:null, status:"new"}' > "$STATE"
@@ -298,6 +309,9 @@ request)
   [ -n "${PR_SESSION_ID:-}" ] && put --arg sid "$PR_SESSION_ID" --arg cwd "${PR_SESSION_CWD:-}" \
     '.session_id=$sid | .cwd=(if $cwd == "" then .cwd else $cwd end) | .sessions=((.sessions // []) + [$sid] | unique)'
   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # Remember the head commit this round is for — a new push after feedback = automatic resubmit.
+  HSHA=$(gh pr view "$PR" --repo "$OWNER/$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+  [ -n "$HSHA" ] && put --arg h "$HSHA" '.head_sha=$h'
   if [ "$ORG" = "teli" ]; then
     NEXT=$((ROUNDS + 1))
     # Feedback that landed while the session was fixing still counts: resume from when it was seen.
@@ -375,7 +389,7 @@ watch)
   [ "${ONESHOT:-0}" = "1" ] && { DEADLINE=$(( $(date +%s) + 1 )); POLL_S=0; }
 
   while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    sleep "$POLL_S"
+    pwait "$POLL_S"
     [ "${ONESHOT:-0}" = "1" ] || put --argjson t "$(date +%s)" '.heartbeat=$t'   # sweeper: a live watcher owns this PR
     ST=$(get .status)
     # Merged or closed on GitHub = the loop is over (people merge by hand after approval, or close).
@@ -515,7 +529,18 @@ If the approval lists nits or follow-ups, address them on the PR branch, push, a
 EOF
         exit 2
       fi
-      exit 0
+      # bevri: the chat is usually waiting on this to merge — always tell it.
+      AM=$(gh pr view "$PR" --repo "$OWNER/$REPO" --json autoMergeRequest --jq 'if .autoMergeRequest then "armed" else "off" end' 2>/dev/null)
+      cat <<EOF
+Alex APPROVED PR #$PR ($OWNER/$REPO) through @teli_review_bot (review round $ROUND). The review loop is finished — do not send it to the bot again.
+
+Alex's verdict:
+${BOTTXT:-<from GitHub>}
+
+Auto-merge is $AM on this PR.
+$( [ "$AM" = "armed" ] && echo "It merges by itself once the required checks pass — nothing to do but confirm it landed (and any post-merge checks you promised)." || echo "Auto-merge is off (the risk check flagged it), so a person merges it. If Harsha already told you to merge it once it was approved, merge it now: gh pr merge $PR --repo $OWNER/$REPO --merge (checks are green), then do any post-merge checks you promised. Otherwise tell Harsha it is approved and waiting for his go." )
+EOF
+      exit 2
     fi
 
     put --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status="changes_requested" | .since=$at'; log "watch: $VERDICT in round $ROUND"
@@ -638,10 +663,26 @@ upd() { local f="$1"; shift; local t; t=$(mktemp "$DIR/.sw.XXXX") && jq "$@" "$f
 
 shopt -s nullglob
 FILES=("$DIR"/*.json)
+# Only PRs owned by a chat on THIS machine (its cwd exists here). Both Macs receive every
+# pr-push event; a PR tracked from the other device is never polled, resumed or resubmitted here.
+OWN=()
+for f in ${FILES[@]+"${FILES[@]}"}; do
+  c=$(jq -r '.cwd // ""' "$f" 2>/dev/null)
+  { [ -z "$c" ] || [ -d "$c" ]; } && OWN+=("$f")
+done
+FILES=(${OWN[@]+"${OWN[@]}"})
 [ ${#FILES[@]} -eq 0 ] && exit 0
 
 AGENTS=$("$CLAUDE_BIN" agents --json 2>/dev/null || echo '[]')
 NOW=$(date +%s)
+
+chat_idle() {   # <short id> — true when the background chat's screen shows it finished and nothing runs
+  local t
+  t=$("$CLAUDE_BIN" logs "$1" 2>/dev/null | tail -c 4000 | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g')
+  [ -n "$t" ] || return 1
+  printf '%s' "$t" | grep -qE 'esc to interrupt|Running…|running (Stop|PreToolUse|PostToolUse)' && return 1
+  printf '%s' "$t" | grep -qE ' · done [0-9]{1,2}:[0-9]{2}'
+}
 
 dispatch() {   # <state-file> <brief>
   local f="$1" brief="$2" url sid cwd kind last out
@@ -666,6 +707,24 @@ dispatch() {   # <state-file> <brief>
   last=$(jq -r '.resumed_epoch // 0' "$f")
   [ $((NOW - last)) -lt "$REDISPATCH_S" ] && { log "$url: resumed $((NOW - last))s ago — not again yet"; return; }
   kind=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s)][0].kind // ""')
+  local bstate
+  bstate=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s)][0].state // ""')
+  # `claude agents` can say "working" for a chat that has been idle for an hour (seen on #5140),
+  # so trust the chat's own terminal: idle = its last status line is "… done <time>" and nothing is running.
+  if [ "$kind" = "background" ] && [ "$bstate" != "done" ] && chat_idle "${sid:0:8}"; then bstate=done; fi
+  if [ "$kind" = "background" ] && [ "$bstate" = "done" ]; then
+    # Idle background chat: nothing is running in it, so stop it and resume it with the brief —
+    # `--bg --resume` with no extra flags continues the SAME session (a live one would be forked).
+    if [ "$DRY" = "1" ]; then log "DRY: would stop+resume idle chat $sid for $url"; return; fi
+    "$CLAUDE_BIN" stop "${sid:0:8}" >/dev/null 2>&1; sleep 3
+    [ -d "$cwd" ] || cwd="$HOME"
+    out=$(cd "$cwd" && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 "$CLAUDE_BIN" --bg --resume "$sid" "[pr-babysitter] Update on $url:
+
+$brief" 2>&1 | tail -3)
+    log "$url: idle background chat $sid stopped + resumed with the brief: $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
+    notify "${url##*/pull/}" "$url — sent the update to its chat"
+    upd "$f" --argjson t "$NOW" --arg s "$sid" '.brief_pending=false | .delivered_to=$s | .resumed_epoch=$t'; return
+  fi
   if [ -n "$kind" ]; then
     # Alive but its watcher is gone, so it never got this. Resuming would fork a copy of a
     # live chat — tell Harsha instead; the brief stays pending for when that chat closes.
@@ -696,6 +755,20 @@ for f in "${FILES[@]}"; do
   fi
 done
 
+# A push after feedback (conflict / CI failure / changes requested) = resubmit, even when the chat
+# never ran `review request` (one chat pushed its fixes and told Harsha "it goes to Alex automatically").
+for f in "${FILES[@]}"; do
+  case "$(jq -r .status "$f")" in changes_requested|conflict|ci_failed) ;; *) continue ;; esac
+  u=$(jq -r .url "$f"); old=$(jq -r '.head_sha // ""' "$f")
+  new=$(gh pr view "$u" --json headRefOid --jq .headRefOid 2>/dev/null)
+  if [ -n "$new" ] && [ -n "$old" ] && [ "$new" != "$old" ]; then
+    r=$(bash "$BOTSH" review request "$u" 2>&1 | head -1)
+    log "$u: new commits pushed after feedback (${old:0:8} -> ${new:0:8}) — resubmitted: $r"
+  elif [ -n "$new" ] && [ -z "$old" ]; then
+    upd "$f" --arg h "$new" '.head_sha=$h'      # older loops: start tracking from now
+  fi
+done
+
 DISPATCHED=0
 for f in "${FILES[@]}"; do
   [ "$DISPATCHED" -ge 1 ] && break     # one resume per sweep — RAM on a 16 GB machine
@@ -704,7 +777,10 @@ for f in "${FILES[@]}"; do
     hb=$(jq -r '.heartbeat // 0' "$f")
     sid=$(jq -r '.session_id // ""' "$f")
     alive=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" 'any(.[]; .sessionId == $s)')
-    if [ "$alive" != "true" ]; then dispatch "$f" "$(jq -r .brief "$f")"; DISPATCHED=1
+    dto=$(jq -r '.delivered_to // ""' "$f")
+    bst=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s)][0].state // ""')
+    [ "$bst" != "done" ] && [ -n "$sid" ] && chat_idle "${sid:0:8}" && bst=done
+    if [ "$alive" != "true" ] || { [ "$bst" = "done" ] && [ "$dto" != "$sid" ]; }; then dispatch "$f" "$(jq -r .brief "$f")"; DISPATCHED=1
     elif [ $((NOW - hb)) -lt "$STALE_S" ] || [ "$st" != "waiting" ]; then :   # chat alive and was rewoken / is working on it
     fi
     continue
