@@ -61,7 +61,7 @@ trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
 # The last literal is split ("a""b" concatenates in shell, value is unchanged) so this
 # file does not match the push guard's own -F scan for it — same self-match defanging
 # git-push-malware-guard.sh applies to its pattern list. Do not rejoin it.
-IOC="global\['\!'\]|_\$_1e42|node -e global|trongrid\.io|aptoslabs\.com|bsc-dataseed|eth_getTransaction""ByHash"
+IOC="global\['\!'\]|_\$_1e42|node -e global|trongrid\.io|aptoslabs\.com|bsc-""dataseed|eth_getTransaction""ByHash"
 
 notify() {
   local tag="$1"; shift; local msg="$*"
@@ -242,20 +242,27 @@ case "$CMD" in
 status) cat "$STATE"; echo; exit 0 ;;
 
 save-brief)
-  B=$(cat); [ -n "$B" ] && put --arg b "$B" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.brief=$b | .brief_at=$at | .brief_pending=true'
+  # DELIVERED_TO=<session id> when the brief already reached that chat (rewake) — so the
+  # deliver-on-next-command path below doesn't send it twice; the sweep still uses brief_pending
+  # to resume the chat if it is closed before acting.
+  B=$(cat); [ -n "$B" ] && put --arg b "$B" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg to "${DELIVERED_TO:-}" \
+    '.brief=$b | .brief_at=$at | .brief_pending=true | .delivered_to=$to'
   exit 0 ;;
 
 rearm)
-  [ "$(get .status)" = "waiting" ] || { echo "PR #$PR is '$(get .status)' — nothing to re-arm"; exit 0; }
+  case "$(get .status)" in waiting|ci_pending) ;; *) echo "PR #$PR is '$(get .status)' — nothing to re-arm"; exit 0 ;; esac
   echo "still waiting on $WHO for PR #$PR (round $(get .rounds)) — watcher re-armed in the background"; exit 0 ;;
 
 request)
   ROUNDS=$(get .rounds)
+  # Record the owning chat right away (the hook passes it) — the sweep needs it to reach that chat.
+  [ -n "${PR_SESSION_ID:-}" ] && put --arg sid "$PR_SESSION_ID" --arg cwd "${PR_SESSION_CWD:-}" \
+    '.session_id=$sid | .cwd=(if $cwd == "" then .cwd else $cwd end) | .sessions=((.sessions // []) + [$sid] | unique)'
   NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if [ "$ORG" = "teli" ]; then
     NEXT=$((ROUNDS + 1))
     # Feedback that landed while the session was fixing still counts: resume from when it was seen.
-    put --arg at "$NOW" --argjson n "$NEXT" '.rounds=$n | .sent_at=(.since // $at) | del(.since) | .brief_pending=false | .status="waiting"'
+    put --arg at "$NOW" --argjson n "$NEXT" '.rounds=$n | .sent_at=(.since // $at) | del(.since) | .brief_pending=false | del(.delivered_to) | .status="waiting"'
     RR=""
     if [ "$NEXT" -gt 1 ]; then   # re-request review from whoever reviewed last -> GitHub notifies them
       LAST=$(gh api "repos/$OWNER/$REPO/pulls/$PR/reviews" --jq '[.[] | select(.user.type != "Bot" and .user.login != "'"$ME_GH"'")] | last | .user.login // empty' 2>/dev/null)
@@ -265,7 +272,21 @@ request)
     echo "teli review round $NEXT armed for PR #$PR.$RR A background watcher wakes you on Pranta's next review or comment."
     exit 0
   fi
-  if [ "$ROUNDS" -ge "$MAX_BOT_ROUNDS" ]; then
+  # C: Alex's bot answers "Not approved — wait for <check>" while CI is still running, which burns a
+  # round. So the bot is only asked once the PR's checks are green; until then the PR is
+  # "ci_pending" and the watcher sends it the moment they pass (FORCE_SEND=1 skips this gate).
+  if [ "${FORCE_SEND:-0}" != "1" ]; then
+    CHK=$(gh pr checks "$PR" --repo "$OWNER/$REPO" 2>&1); CRC=$?
+    if [ "$CRC" -ne 0 ] && ! echo "$CHK" | grep -qi 'no checks reported'; then
+      put --arg at "$NOW" '.status="ci_pending" | .ci_since=$at | .brief_pending=false | del(.delivered_to) | del(.since)'
+      log "ci-gated: checks not green yet (gh rc=$CRC) — bot request held until they pass"
+      echo "ci-gated: PR $PR's checks aren't green yet — the babysitter sends it to $BOT automatically once they pass (round $((ROUNDS + 1)) of $MAX_BOT_ROUNDS)."
+      exit 0
+    fi
+  fi
+  # B: a resend after a CI-only "Not approved" is not a new review round.
+  CIR=$(get '.ci_retry // false')
+  if [ "$CIR" != "true" ] && [ "$ROUNDS" -ge "$MAX_BOT_ROUNDS" ]; then
     put '.status="escalated"'
     log "escalate: bot sent it back $ROUNDS times -> Slack $SLACK_GROUP tagging Arbaaz"
     notify ESCALATE "bot sent it back $ROUNDS times — asking Arbaaz on Slack"
@@ -281,10 +302,10 @@ EOF
   fi
   OUT=$(tgr send "$BOT" "PR $PR $REPO") || { log "tg send FAILED: $OUT"; echo "FAILED to message $BOT: $OUT"; exit 1; }
   MID=$(echo "$OUT" | sed -nE 's/^sent id=([0-9]+).*/\1/p')
-  NEXT=$((ROUNDS + 1))
+  if [ "$CIR" = "true" ]; then NEXT=$ROUNDS; [ "$NEXT" -lt 1 ] && NEXT=1; else NEXT=$((ROUNDS + 1)); fi
   put --argjson mid "${MID:-0}" --arg at "$NOW" --argjson n "$NEXT" \
-      '.rounds=$n | .last_sent_id=$mid | .sent_at=$at | del(.since) | .brief_pending=false | .status="waiting"'
-  log "round $NEXT/$MAX_BOT_ROUNDS sent to $BOT (tg msg $MID)"
+      '.rounds=$n | .last_sent_id=$mid | .sent_at=$at | del(.since) | .ci_retry=false | .brief_pending=false | del(.delivered_to) | .status="waiting"'
+  log "round $NEXT/$MAX_BOT_ROUNDS sent to $BOT (tg msg $MID)$( [ "$CIR" = "true" ] && echo ' — CI-only resend, not a new round')"
   echo "sent 'PR $PR $REPO' to $BOT — review round $NEXT of $MAX_BOT_ROUNDS; a background watcher picks up the verdict."
   exit 0
   ;;
@@ -295,39 +316,91 @@ watch)
   [ -n "${PR_SESSION_ID:-}" ] && put --arg sid "$PR_SESSION_ID" --arg cwd "${PR_SESSION_CWD:-}" \
     '.session_id=$sid | .cwd=$cwd | .sessions=((.sessions // []) + [$sid] | unique)'
   # The request may still be in flight (the sync hook and this watcher start together).
-  [ "${ONESHOT:-0}" = "1" ] || for _ in $(seq 1 12); do [ "$(get .status)" = "waiting" ] && break; sleep 5; done
-  [ "$(get .status)" = "waiting" ] || { log "watch: status=$(get .status), nothing to watch"; exit 0; }
+  [ "${ONESHOT:-0}" = "1" ] || for _ in $(seq 1 12); do case "$(get .status)" in waiting|ci_pending) break ;; esac; sleep 5; done
+  # A verdict found while nobody was watching (the sweep polls when the in-session watcher is
+  # down) is saved as a brief — hand it to this chat now instead of waiting for a new one.
+  if [ "${ONESHOT:-0}" != "1" ] && [ "$(get .brief_pending)" = "true" ] && ! echo "$(get .status)" | grep -qxE 'waiting|ci_pending'; then
+    put --arg to "${PR_SESSION_ID:-}" '.brief_pending=false | .delivered_to=$to'; log "watch: delivering saved brief (status=$(get .status))"; get .brief; exit 2
+  fi
+  case "$(get .status)" in waiting|ci_pending) ;; *) log "watch: status=$(get .status), nothing to watch"; exit 0 ;; esac
   SENT_ID=$(get .last_sent_id); SENT_AT=$(get .sent_at); ROUND=$(get .rounds)
-  # Bot replies about THIS PR: mentions the number, or nothing else is pending.
-  OTHERS=$(jq -r 'select(.status=="waiting") | .pr' "$DIR"/*.json 2>/dev/null | grep -vx "$PR" | wc -l | tr -d ' ')
-  log "watch: round $ROUND, after tg msg $SENT_ID / $SENT_AT"
+  log "watch: $(get .status), round $ROUND, after tg msg $SENT_ID / $SENT_AT"
   DEADLINE=$(( $(date +%s) + WATCH_S ))
   [ "${ONESHOT:-0}" = "1" ] && { DEADLINE=$(( $(date +%s) + 1 )); POLL_S=0; }
 
   while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     sleep "$POLL_S"
     [ "${ONESHOT:-0}" = "1" ] || put --argjson t "$(date +%s)" '.heartbeat=$t'   # sweeper: a live watcher owns this PR
-    [ "$(get .status)" = "waiting" ] && [ "$(get .sent_at)" = "$SENT_AT" ] && [ "$(get .rounds)" = "$ROUND" ] \
-      || { log "watch: superseded (status=$(get .status)) — stopping"; exit 0; }
+    ST=$(get .status)
+    # ---- C/B: CI gate — the bot is only asked once checks are green
+    if [ "$ST" = "ci_pending" ]; then
+      CHK=$(gh pr checks "$PR" --repo "$OWNER/$REPO" 2>&1); CRC=$?
+      if [ "$CRC" -eq 0 ] || echo "$CHK" | grep -qi 'no checks reported'; then
+        R=$(FORCE_SEND=1 PR_REVIEW_BOT_DIR="$DIR" TG_BIN="$TG" bash "$HOME/.claude/scripts/pr-babysitter.sh" review request "$URL")
+        log "watch: checks green — $R"
+        echo "$R" | grep -q '^ESCALATE' && { echo "$R"; exit 2; }
+        SENT_ID=$(get .last_sent_id); SENT_AT=$(get .sent_at); ROUND=$(get .rounds)
+        continue
+      elif [ "$CRC" -eq 8 ]; then
+        continue                                   # still running
+      fi
+      put --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status="ci_failed" | .since=$at'; log "watch: CI FAILED — waking the chat"
+      notify CIFAIL "a check failed — waking the PR's session"
+      cat <<EOF
+A CI check on PR #$PR ($OWNER/$REPO) FAILED, so it has NOT been sent to $WHO's review bot yet (the bot rejects PRs with red or pending checks).
+
+Failing checks:
+$(echo "$CHK" | grep -iE 'fail|error|cancel' | head -20)
+
+You opened this PR, so you have the context. Do this now, before other work:
+1. Look at the failing run (gh pr checks $PR --repo $OWNER/$REPO, then gh run view <id> --log-failed) and fix the cause on the PR's own branch. If it is flaky/infra and not your change, re-run it (gh run rerun <id> --failed) instead.
+2. Commit and push to the PR branch (never force-push a shared branch).
+3. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
+   That waits for the checks again and sends it to the bot once they pass.
+The babysitter is watching this PR — do not start your own watchers or polling loops; it wakes you when there is something to do.
+EOF
+      exit 2
+    fi
+    [ "$ST" = "waiting" ] && [ "$(get .sent_at)" = "$SENT_AT" ] && [ "$(get .rounds)" = "$ROUND" ] \
+      || { log "watch: superseded (status=$ST) — stopping"; exit 0; }
 
     BOTTXT=""
-    [ "$ORG" = "bevri" ] && BOTTXT=$(tgr json "$BOT" 30 2>/dev/null | jq -r --argjson sid "$SENT_ID" --arg pr "$PR" --argjson others "$OTHERS" '
+    # A: only verdicts for THIS PR. Every bot verdict starts "bevri-ai/<repo> #<n>"; "Queued review
+    # of …" acks are skipped. (Without this, #5136 once took #354's approval as its own verdict.)
+    [ "$ORG" = "bevri" ] && BOTTXT=$(tgr json "$BOT" 30 2>/dev/null | jq -r --argjson sid "$SENT_ID" --arg hdr "$OWNER/$REPO #$PR" '
       [ .[] | select(.out == false and .id > $sid)
-            | select($others == 0 or (.text | test("(PR|#|pull/) ?" + $pr + "\\b"; "i"))) | .text ]
-      | join("\n---\n")' 2>/dev/null)
+            | select(.text | startswith($hdr)) | select((.text | ltrimstr($hdr) | test("^[0-9]")) | not) | .text ]
+      | last // ""' 2>/dev/null)
     GHREV=$(gh api "repos/$OWNER/$REPO/pulls/$PR/reviews" 2>/dev/null | jq -r --arg at "$SENT_AT" --arg me "$ME_GH" '
       [ .[] | select(.submitted_at > $at and .user.login != $me and .user.type != "Bot" and .state != "DISMISSED") ]')
     # PR conversation comments (Pranta posts re-reviews there) — humans only, not us.
-    ISSUEC=""
-    [ "$ORG" = "teli" ] && ISSUEC=$(gh api "repos/$OWNER/$REPO/issues/$PR/comments" 2>/dev/null | jq -r --arg at "$SENT_AT" --arg me "$ME_GH" '
+    ISSUEC=$(gh api "repos/$OWNER/$REPO/issues/$PR/comments" 2>/dev/null | jq -r --arg at "$SENT_AT" --arg me "$ME_GH" '
       [ .[] | select(.created_at > $at and .user.login != $me and .user.type != "Bot") | "\(.user.login): \(.body)" ] | join("\n---\n")' 2>/dev/null)
     INLINE=$(gh api "repos/$OWNER/$REPO/pulls/$PR/comments" 2>/dev/null | jq -r --arg at "$SENT_AT" --arg me "$ME_GH" '
       .[] | select(.created_at > $at and .user.login != $me and .user.type != "Bot") | "- \(.path):\(.line // .original_line // "?") — \(.body)"' 2>/dev/null)
     GHSTATE=$(printf '%s' "$GHREV" | jq -r 'map(.state) | if index("CHANGES_REQUESTED") then "CHANGES_REQUESTED" elif index("APPROVED") then "APPROVED" else "" end' 2>/dev/null)
 
     VERDICT=""
-    if [ "$GHSTATE" = "APPROVED" ]; then VERDICT=approved
+    # E: the bot's fixed format — line 2 is "Approved." or "Not approved.", then "Needed for approval: 1. …".
+    #    Mirrored on GitHub as an alexi089 COMMENTED review with the same body.
+    if [ "$ORG" = "bevri" ]; then
+      VTXT="$BOTTXT"
+      [ -z "$VTXT" ] && VTXT=$(printf '%s' "$GHREV" | jq -r '[.[] | select(.body | test("^\\s*(Not approved|Approved)\\."; "m"))] | last | .body // ""' 2>/dev/null)
+      if [ -n "$VTXT" ]; then
+        if printf '%s\n' "$VTXT" | grep -qE '^[[:space:]]*Not approved\.'; then
+          ITEMS=$(printf '%s\n' "$VTXT" | sed -n '/Needed for approval/,$p' | grep -E '^[[:space:]]*[0-9]+\.')
+          # B: every item is "Wait for <check> to complete" = CI still running, not a code problem
+          if [ -n "$ITEMS" ] && ! printf '%s\n' "$ITEMS" | grep -qviE '^[[:space:]]*[0-9]+\.[[:space:]]*wait for .* to (complete|finish|pass)'; then VERDICT=ci_only
+          else VERDICT=changes; fi
+        elif printf '%s\n' "$VTXT" | grep -qE '^[[:space:]]*Approved\.'; then VERDICT=approved
+        elif printf '%s\n' "$VTXT" | grep -qiE 'could not complete the request|check repository access'; then VERDICT=unclear
+        fi
+      fi
+    fi
+    if [ -n "$VERDICT" ]; then :
+    elif [ "$GHSTATE" = "APPROVED" ]; then VERDICT=approved
     elif [ "$GHSTATE" = "CHANGES_REQUESTED" ]; then VERDICT=changes
+    elif [ "$ORG" = "bevri" ] && printf '%s' "$GHREV" | jq -r '.[].body' 2>/dev/null | grep -qiE 'not approved|without approval|needed for approval'; then VERDICT=changes
     elif [ "$ORG" = "teli" ]; then
       # Review left as COMMENTED, or a conversation comment / inline comments with no review state.
       FEED="$(printf '%s' "$GHREV" | jq -r '.[].body' 2>/dev/null)$ISSUEC$INLINE"
@@ -337,12 +410,21 @@ watch)
         else VERDICT=changes; fi   # any other human feedback = something to address
       fi
     elif [ -n "$BOTTXT" ]; then
-      if   echo "$BOTTXT" | grep -qiE "changes requested|request(ed|ing)? changes|needs? (changes|work)|blocking|blocker|must fix|not approv|can'?t approve|cannot approve|reject"; then VERDICT=changes
+      # Real bot format (seen 10-02): "bevri-ai/<repo> #N: Review posted without approval; ... **blocking ...**"
+      #                              "bevri-ai/<repo> #N: GitHub could not complete the request. Check repository access and PR state."
+      if   echo "$BOTTXT" | grep -qiE "could not complete the request|check repository access"; then VERDICT=unclear
+      elif echo "$BOTTXT" | grep -qiE "without approval|changes requested|request(ed|ing)? changes|needs? (changes|work)|blocking|blocker|must fix|not approv|can'?t approve|cannot approve|reject"; then VERDICT=changes
       elif echo "$BOTTXT" | grep -qiE '\b(approved|approving|lgtm)\b'; then VERDICT=approved
       elif [ "${#BOTTXT}" -gt 250 ]; then VERDICT=unclear   # a real review we can't classify — let the session judge
       fi                                                  # short unclassified = queue ack, keep waiting
     fi
     [ -z "$VERDICT" ] && continue
+    if [ "$VERDICT" = "ci_only" ]; then
+      # B: not a code review result — wait for the checks, then resend without spending a round.
+      put --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status="ci_pending" | .ci_retry=true | .ci_since=$at'
+      log "watch: bot only waiting on CI (round $ROUND) — resending automatically once checks pass, not a new round"
+      continue
+    fi
 
     if [ "$VERDICT" = "approved" ]; then
       put '.status="approved"'; log "watch: APPROVED in round $ROUND"
@@ -382,11 +464,13 @@ Inline comments:
 $INLINE}
 
 You opened this PR, so you have the context. Do this now, before other work:
-1. Address every point on the PR's own branch (the worktree/branch you opened it from). If a requested change is wrong, unsafe, or needs a product decision, stop and ask Harsha instead of guessing.
+1. Also read the PR yourself (gh pr view $PR --repo $OWNER/$REPO --comments, and the review threads) so nothing above is missed.
+   Address EVERY point on the PR's own branch (the worktree/branch you opened it from). If a requested change is wrong, unsafe, or needs a product decision, stop and ask Harsha instead of guessing.
 2. Commit and push to the PR branch (never force-push a shared branch); merge origin/main in if it is behind.
 3. Post ONE PR comment with gh pr comment, same style as earlier rounds: "Round $ROUND addressed in \`<sha>\`" then each item number and what changed (tests run + result).
 4. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
    That re-requests Pranta's review on GitHub and starts the next watcher. This repeats until he approves.
+The babysitter is watching this PR — do not start your own watchers or polling loops; it wakes you when there is something to do.
 EOF
       exit 2
     fi
@@ -399,16 +483,21 @@ ${BOTTXT:-<none — the verdict came from GitHub>}
 
 GitHub reviews since the request:
 $(printf '%s' "$GHREV" | jq -r '.[] | "[\(.state)] \(.user.login): \(.body)"' 2>/dev/null)
+${ISSUEC:+
+PR conversation comments:
+$ISSUEC}
 ${INLINE:+
 Inline comments:
 $INLINE}
 
 You opened this PR, so you have the context. Do this now, before other work:
-1. Address every point on the PR's own branch (the worktree/branch you opened it from). Fix what Alex asked for; do not reply to him through the bot.
+1. Also read the PR yourself (gh pr view $PR --repo $OWNER/$REPO --comments, and the review threads) so nothing above is missed.
+   Address EVERY point on the PR's own branch (the worktree/branch you opened it from). "Wait for check X" items need no action — the babysitter holds the resend until checks pass. Fix what Alex asked for; do not reply to him through the bot.
    If a requested change is wrong, unsafe, or needs a product decision, stop and ask Harsha instead of guessing.
 2. Commit and push to the PR branch (never force-push a shared branch).
 3. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
-   $( [ "$LEFT" -gt 0 ] && echo "That sends it back to the bot ($LEFT bot round(s) left) and starts a new watcher." || echo "Bot rounds are used up — that command prints the Slack escalation (tag Arbaaz in the PR group); send it exactly as printed." )
+   $( [ "$LEFT" -gt 0 ] && echo "That waits for the checks to pass, sends it back to the bot ($LEFT bot round(s) left) and starts a new watcher." || echo "Bot rounds are used up — that command prints the Slack escalation (tag Arbaaz in the PR group); send it exactly as printed." )
+The babysitter is watching this PR — do not start your own watchers or polling loops; it wakes you when there is something to do.
 EOF
     exit 2
   done
@@ -487,6 +576,18 @@ dispatch() {   # <state-file> <brief>
   local f="$1" brief="$2" url sid cwd kind last out
   url=$(jq -r .url "$f"); sid=$(jq -r '.session_id // ""' "$f"); cwd=$(jq -r '.cwd // ""' "$f")
   if [ -z "$sid" ]; then
+    # Fallback: the chat whose transcript holds this hook's own launch message for the PR — only the
+    # chat that ran `gh pr create` has it (a chat that merely discusses the URL does not).
+    local tf
+    tf=$(grep -l -F "PR babysitter launched for $url" "$HOME"/.claude/projects/*/*.jsonl 2>/dev/null | xargs ls -t 2>/dev/null | head -1)
+    if [ -n "$tf" ]; then
+      sid=$(basename "$tf" .jsonl)
+      cwd=$(grep -m1 -o '"cwd":"[^"]*"' "$tf" | sed 's/"cwd":"//; s/"$//')
+      upd "$f" --arg sid "$sid" --arg cwd "$cwd" '.session_id=$sid | .cwd=(if (.cwd // "") == "" then $cwd else .cwd end)'
+      log "$url: no session recorded — found it from transcript: $sid"
+    fi
+  fi
+  if [ -z "$sid" ]; then
     log "$url: verdict but no session recorded — notifying only"
     notify "${url##*/pull/}" "review feedback on $url — no chat recorded, open it yourself"
     upd "$f" '.brief_pending=false'; return
@@ -527,7 +628,7 @@ for f in "${FILES[@]}"; do
     fi
     continue
   fi
-  [ "$st" = "waiting" ] || continue
+  case "$st" in waiting|ci_pending) ;; *) continue ;; esac   # ci_pending: the poll also sends once CI is green
   hb=$(jq -r '.heartbeat // 0' "$f")
   [ $((NOW - hb)) -lt "$STALE_S" ] && continue          # a live watcher owns it
   OUT=$(ONESHOT=1 bash "$BOTSH" review watch "$url" 2>/dev/null); RC=$?
@@ -540,8 +641,14 @@ done
 exit 0
 }
 
+# Brace group + exit: bash parses the whole block before running it, so an edit to this file
+# while a hook is mid-run can't make it read garbage (that happened once, 2026-10-02).
+# Still replace the file atomically (write temp + mv), never edit it in place.
+{
 case "${1:-}" in
   review) shift; review_main "$@" ;;
   sweep)  shift; sweep_main "$@" ;;
   *)      babysit_main "$@" ;;
 esac
+exit $?
+}

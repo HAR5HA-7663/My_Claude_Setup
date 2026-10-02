@@ -5,8 +5,10 @@
 #   jev-replicate pi   user@host      # brain query node only: Jev rerank + fixed store + key
 #   add --dry-run to see what would change.
 #
-# Never copies ~/.env wholesale. Only TYPESAFE_API_KEY travels (into the target's ~/.env
-# [personal] block, or the Pi brain's .env), and only if it is not already there.
+# Never copies ~/.env wholesale. Only TYPESAFE_API_KEY (+ for mac: TELEGRAM_API_ID/HASH for the
+# tg CLI) travel (into the target's ~/.env [personal] block, or the Pi brain's .env), and only
+# if not already there. The Telegram login session itself is never copied (two machines on one
+# auth key get it revoked) - the target logs in once with: ssh -t <target> tg login
 set -euo pipefail
 KIND="${1:?mac|pi}"; TARGET="${2:?user@host}"; DRY=""; [ "${3:-}" = "--dry-run" ] && DRY="--dry-run"
 SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
@@ -14,6 +16,8 @@ RS="rsync -az $DRY -e \"$SSH\""
 say() { printf '\n== %s\n' "$*"; }
 $SSH "$TARGET" true || { echo "cannot ssh to $TARGET with key auth — run: ssh-copy-id $TARGET"; exit 1; }
 KEY=$("$HOME/.local/bin/with-env" -q --only TYPESAFE_API_KEY printenv TYPESAFE_API_KEY)
+TGID=$("$HOME/.local/bin/with-env" -q --scope personal --only TELEGRAM_API_ID printenv TELEGRAM_API_ID 2>/dev/null || true)
+TGHASH=$("$HOME/.local/bin/with-env" -q --scope personal --only TELEGRAM_API_HASH printenv TELEGRAM_API_HASH 2>/dev/null || true)
 
 if [ "$KIND" = "mac" ]; then
   say "CLI tools -> ~/.local/bin"
@@ -21,7 +25,14 @@ if [ "$KIND" = "mac" ]; then
   say "gate tuning -> ~/.config/jev-gate.env (if present)"
   [ -f ~/.config/jev-gate.env ] && eval $RS ~/.config/jev-gate.env "$TARGET:.config/jev-gate.env"
   say "hooks + helper scripts -> ~/.claude/scripts"
-  eval $RS ~/.claude/scripts/{jev-bash-risk-gate.sh,jev-pr-risk.sh,jev-verify-report,jev-triage-messages.py,jev-triage-tickets.py,headless-triage-run.sh,local-malware-precheck.sh,local-malware-postcheck.sh,pr-babysitter-hook.sh} "$TARGET:.claude/scripts/"
+  eval $RS ~/.claude/scripts/{jev-bash-risk-gate.sh,jev-pr-risk.sh,jev-verify-report,jev-triage-messages.py,jev-triage-tickets.py,headless-triage-run.sh,local-malware-precheck.sh,local-malware-postcheck.sh,pr-babysitter-hook.sh,pr-babysitter.sh,pr-babysitter-async.sh} "$TARGET:.claude/scripts/"
+  say "tg (Telethon user CLI, for the PR babysitter's review bot) -> ~/tools/tg + ~/.local/bin/tg"
+  $SSH "$TARGET" 'mkdir -p ~/tools/tg'
+  eval $RS ~/tools/tg/tg.py "$TARGET:tools/tg/"
+  eval $RS ~/.local/bin/tg "$TARGET:.local/bin/"
+  say "PR babysitter menu bar app source -> ~/tools/pr-babysitter-bar (built on the target)"
+  $SSH "$TARGET" 'mkdir -p ~/tools/pr-babysitter-bar'
+  eval $RS ~/tools/pr-babysitter-bar/main.swift ~/tools/pr-babysitter-bar/build.sh "$TARGET:tools/pr-babysitter-bar/"
   say "skills"
   eval $RS ~/.claude/skills/{morning-triage,monday-triage,brain-query,wiki-ingest,wiki-lint,loopengg} "$TARGET:.claude/skills/"
   say "jev-compact plugin source -> ~/Desktop/Personal/jev-compact"
@@ -34,9 +45,9 @@ if [ "$KIND" = "mac" ]; then
   fi
   [ -n "$DRY" ] && { say "dry run: stopping before remote changes"; exit 0; }
   say "remote: permissions, key, hook registration, CLAUDE.md section, launchd"
-  $SSH "$TARGET" "TS_KEY='$KEY' bash -s" <<'REMOTE'
+  $SSH "$TARGET" "TS_KEY='$KEY' TG_ID='$TGID' TG_HASH='$TGHASH' bash -s" <<'REMOTE'
 set -u
-chmod 755 ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} ~/.claude/scripts/{jev-*,headless-triage-run.sh,local-malware-*,pr-babysitter-hook.sh} 2>/dev/null
+chmod 755 ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate,tg} ~/.claude/scripts/{jev-*,headless-triage-run.sh,local-malware-*,pr-babysitter*.sh} 2>/dev/null
 mkdir -p ~/.local/state/jev
 # key -> ~/.env [personal] block (create the file if missing), never printed
 if [ ! -f ~/.env ]; then printf '[personal]\nTYPESAFE_API_KEY=%s\n\n[bevri]\n\n[teli]\n\n[fsbo]\n\n[other]\n' "$TS_KEY" > ~/.env; chmod 600 ~/.env; echo "  ~/.env created with the key"
@@ -44,6 +55,53 @@ elif ! grep -q '^TYPESAFE_API_KEY=' ~/.env; then
   if grep -q '^\[personal\]' ~/.env; then awk -v k="$TS_KEY" '{print} /^\[personal\]$/ && !d {print "TYPESAFE_API_KEY=" k; d=1}' ~/.env > ~/.env.tmp && mv ~/.env.tmp ~/.env
   else printf '\n[personal]\nTYPESAFE_API_KEY=%s\n' "$TS_KEY" >> ~/.env; fi; chmod 600 ~/.env; echo "  key added to ~/.env"
 else echo "  key already present in ~/.env"; fi
+# Telegram API id/hash -> [personal] (tg CLI), never printed
+for kv in "TELEGRAM_API_ID=$TG_ID" "TELEGRAM_API_HASH=$TG_HASH"; do
+  n=${kv%%=*}; [ -n "${kv#*=}" ] || continue
+  grep -q "^$n=" ~/.env || { awk -v l="$kv" '{print} /^\[personal\]$/ && !d {print l; d=1}' ~/.env > ~/.env.tmp && mv ~/.env.tmp ~/.env; chmod 600 ~/.env; echo "  $n added to ~/.env"; }
+done
+# tg venv (Telethon pinned like the laptop)
+UV=$(command -v uv || ls /opt/homebrew/bin/uv ~/.local/bin/uv 2>/dev/null | head -1)
+if [ -n "$UV" ]; then
+  [ -x ~/tools/tg/.venv/bin/python ] || "$UV" venv -q ~/tools/tg/.venv
+  "$UV" pip install -q --python ~/tools/tg/.venv/bin/python 'telethon==1.40.*' && echo "  tg venv ready"
+else echo "  uv not found — tg venv skipped"; fi
+mkdir -p ~/.local/state/tg && chmod 700 ~/.local/state/tg
+[ -f ~/.local/state/tg/me.session ] && echo "  tg: logged in" || echo "  tg: NOT logged in yet — run once: ssh -t $(whoami)@$(hostname) tg login   (until then bevri PRs fall back to Slack)"
+# PR babysitter: review loop rides the async hook (1 h budget) + 5-min sweep for closed chats
+python3 - <<'PYB'
+import json, os
+p = os.path.expanduser("~/.claude/settings.json"); d = json.load(open(p))
+for g in d.get("hooks", {}).get("PostToolUse", []):
+    if g.get("matcher") != "Bash": continue
+    g["hooks"] = [h for h in g["hooks"] if "pr-review-watch" not in h.get("command", "")]
+    for h in g["hooks"]:
+        if "pr-babysitter-async" in h.get("command", ""):
+            h.update(timeout=3600, statusMessage="Babysitting the PR (base sync, checks, review)…",
+                     rewakeMessage="PR babysitter needs you — act on this now, before other work:",
+                     rewakeSummary="PR babysitter: conflict or review feedback", asyncRewake=True)
+json.dump(d, open(p, "w"), indent=2, ensure_ascii=False); open(p, "a").write("\n"); print("  pr-babysitter async hook: 3600 s, review-aware")
+PYB
+mkdir -p ~/.claude/pr-babysitter
+PL=~/Library/LaunchAgents/com.harsha.pr-babysitter-sweep.plist
+cat > "$PL" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.harsha.pr-babysitter-sweep</string>
+    <key>ProgramArguments</key><array><string>/bin/bash</string><string>$HOME/.claude/scripts/pr-babysitter.sh</string><string>sweep</string></array>
+    <key>StartInterval</key><integer>300</integer>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>$HOME/.claude/pr-babysitter/sweep-launchd.log</string>
+    <key>StandardErrorPath</key><string>$HOME/.claude/pr-babysitter/sweep-launchd.log</string>
+</dict>
+</plist>
+PLIST
+launchctl unload "$PL" 2>/dev/null; launchctl load "$PL" && echo "  launchd com.harsha.pr-babysitter-sweep loaded"
+# menu bar app (needs swiftc from the Xcode command line tools)
+if command -v swiftc >/dev/null 2>&1; then bash ~/tools/pr-babysitter-bar/build.sh 2>&1 | tail -1 | sed 's/^/  /'
+else echo "  swiftc not found — menu bar app skipped (xcode-select --install)"; fi
 # hook registration
 python3 - <<'PY'
 import json, os

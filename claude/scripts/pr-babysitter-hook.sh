@@ -15,12 +15,18 @@
 # No-op for every other Bash command.
 # Fed the hook JSON on stdin; matches on the command text + a PR URL in the output.
 set -uo pipefail
+# Whole body in one brace group — see pr-babysitter-async.sh.
+{
 
 IN=$(cat 2>/dev/null || true)
 [ -z "$IN" ] && exit 0
 
 CMD=$(echo "$IN" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-echo "$CMD" | grep -q 'gh pr create' || exit 0
+export PR_SESSION_ID=$(echo "$IN" | jq -r '.session_id // ""' 2>/dev/null)
+export PR_SESSION_CWD=$(echo "$IN" | jq -r '.cwd // ""' 2>/dev/null)
+# Only a real `gh pr create` invocation (start of the command or of a ; && || | ( $( segment),
+# never a command that merely mentions it — a test once fired this hook and messaged the review bot.
+printf '%s\n' "$CMD" | grep -qE '(^|[;&|(]|\$\(|&&|\|\|)[[:space:]]*(command[[:space:]]+)?gh[[:space:]]+pr[[:space:]]+create\b' || exit 0
 
 URL=$(echo "$IN" | jq -r '.tool_response | tostring' 2>/dev/null \
       | grep -oE 'https://github\.com/[^/"]+/[^/"]+/pull/[0-9]+' | head -1)
@@ -100,11 +106,11 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') $OWNER_REPO#$PRNUM: route=$ROUTE; $READY_NOTE
 # If the Telegram send fails, fall through to the old Slack approval request.
 if [ "$ROUTE" = "bevri" ]; then
   BOT_OUT=$(bash "$HOME/.claude/scripts/pr-babysitter.sh" review request "$URL" 2>&1)
-  if echo "$BOT_OUT" | grep -q '^sent '; then
+  if echo "$BOT_OUT" | grep -qE '^(sent |ci-gated:)'; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') $OWNER_REPO#$PRNUM: review requested from @teli_review_bot (no Slack)" >> "$HLOG"
-    BOT_INSTR="A PR was just created: $URL ($OWNER_REPO #$PRNUM). This is a bevri PR. The approval request was already sent to @teli_review_bot on Telegram by the hook ($BOT_OUT). Do NOT post it in Slack. A background watcher will wake you if the bot requests changes — then fix them on the PR branch, push, and run 'bash ~/.claude/scripts/pr-babysitter.sh review request $URL' to send it back. Mechanical steps already done by the hook: $READY_NOTE; $AM_NOTE. If one of those FAILED, retry it once yourself ('gh pr ready $PRNUM --repo $OWNER_REPO' / 'gh pr merge $PRNUM --repo $OWNER_REPO --auto --merge'); if it still fails, just report the failure — NEVER merge the PR directly yourself.$( [ "$RISKY" = "true" ] && echo " The Jev risk classifier flagged this PR ($RISK_FLAGS), so auto-merge was deliberately NOT armed — do not arm it yourself; tell Harsha it needs a manual merge after approval." )"
-    jq -n --arg url "$URL" --arg ready "$READY_NOTE" --arg am "$AM_NOTE" --arg risk "$RISK_NOTE" --arg instr "$BOT_INSTR" '{
-      systemMessage: "PR babysitter launched for \($url) [bevri] — \($ready); \($am); \($risk); review requested from @teli_review_bot (Telegram); review watcher + checks watch running.",
+    BOT_INSTR="A PR was just created: $URL ($OWNER_REPO #$PRNUM). This is a bevri PR. The hook handled the @teli_review_bot request ($BOT_OUT). Do NOT post it in Slack and do not message the bot yourself. The babysitter is watching this PR — do not start your own watchers or polling loops. It will wake you if the bot requests changes — then fix them on the PR branch, push, and run 'bash ~/.claude/scripts/pr-babysitter.sh review request $URL' to send it back. Mechanical steps already done by the hook: $READY_NOTE; $AM_NOTE. If one of those FAILED, retry it once yourself ('gh pr ready $PRNUM --repo $OWNER_REPO' / 'gh pr merge $PRNUM --repo $OWNER_REPO --auto --merge'); if it still fails, just report the failure — NEVER merge the PR directly yourself.$( [ "$RISKY" = "true" ] && echo " The Jev risk classifier flagged this PR ($RISK_FLAGS), so auto-merge was deliberately NOT armed — do not arm it yourself; tell Harsha it needs a manual merge after approval." )"
+    jq -n --arg url "$URL" --arg ready "$READY_NOTE" --arg am "$AM_NOTE" --arg risk "$RISK_NOTE" --arg instr "$BOT_INSTR" --arg bot "$BOT_OUT" '{
+      systemMessage: "PR babysitter launched for \($url) [bevri] — \($ready); \($am); \($risk); review bot (Telegram): \(if ($bot | startswith("ci-gated")) then "queued until CI passes" else "requested" end); review watcher + checks watch running.",
       hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $instr}
     }'
     exit 0
@@ -140,3 +146,4 @@ jq -n --arg url "$URL" --arg route "$ROUTE" --arg target "$TARGET_ID" --arg read
   hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $instr}
 }'
 exit 0
+}
