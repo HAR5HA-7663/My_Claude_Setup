@@ -252,7 +252,7 @@ LOG="$DIR/loop.log"
 
 CMD="${1:-}"; URL="${2:-}"
 echo "$URL" | grep -qE '^https://github\.com/(bevri-ai|teli-ai-llc)/[^/]+/pull/[0-9]+' \
-  || { echo "usage: pr-babysitter.sh review request|watch|rearm|status|save-brief <bevri-ai|teli-ai-llc PR url>"; exit 1; }
+  || { echo "usage: pr-babysitter.sh review request|watch|rearm|status|save-brief|pause|resume <bevri-ai|teli-ai-llc PR url> [pause-until-epoch]"; exit 1; }
 OWNER=$(echo "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+).*#\1#')
 REPO=$(echo  "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+).*#\2#')
 PR=$(echo    "$URL" | sed -E 's#https://github.com/([^/]+)/([^/]+)/pull/([0-9]+).*#\3#')
@@ -298,6 +298,28 @@ save-brief)
   B=$(cat); [ -n "$B" ] && put --arg b "$B" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg to "${DELIVERED_TO:-}" \
     '.brief=$b | .brief_at=$at | .brief_pending=true | .delivered_to=$to'
   exit 0 ;;
+
+pause)
+  # Stop all polling for this PR (watchers exit on their next tick, the sweep skips it).
+  # Optional 3rd arg = epoch seconds when the sweep turns it back on by itself.
+  case "$(get .status)" in paused) echo "PR #$PR is already paused"; exit 0 ;; merged|closed|cancelled) echo "PR #$PR is $(get .status)"; exit 0 ;; esac
+  UNTIL="${3:-}"
+  put --arg u "$UNTIL" '.paused_from=.status | .status="paused" | (if $u == "" then del(.paused_until) else .paused_until=($u|tonumber) end)'
+  log "paused (was $(get .paused_from))${UNTIL:+ until $(date -r "$UNTIL" '+%a %H:%M')}"
+  echo "paused PR #$PR${UNTIL:+ until $(date -r "$UNTIL" '+%a %H:%M')}"; exit 0 ;;
+
+stop)
+  # "Stop tracking" from the menu bar — remembers where it was so it can be restarted.
+  case "$(get .status)" in cancelled|merged|closed) echo "PR #$PR is $(get .status)"; exit 0 ;; esac
+  put '.stopped_from=(if .status == "paused" then (.paused_from // "waiting") else .status end) | .status="cancelled" | del(.paused_from) | del(.paused_until)'
+  log "tracking stopped (was $(get .stopped_from))"; echo "stopped tracking PR #$PR"; exit 0 ;;
+
+resume)
+  case "$(get .status)" in paused|cancelled) ;; *) echo "PR #$PR is not paused or stopped ($(get .status))"; exit 0 ;; esac
+  # Back to where it was; heartbeat 0 so the sweep polls it on its next run. Reviews that landed
+  # while paused are still picked up (the watch reads everything since the round started).
+  put '.status=(.paused_from // .stopped_from // "waiting") | del(.paused_from) | del(.paused_until) | del(.stopped_from) | .heartbeat=0'
+  log "resumed ($(get .status))"; echo "resumed PR #$PR ($(get .status))"; exit 0 ;;
 
 rearm)
   case "$(get .status)" in waiting|ci_pending) ;; *) echo "PR #$PR is '$(get .status)' — nothing to re-arm"; exit 0 ;; esac
@@ -745,13 +767,24 @@ $brief"
   upd "$f" --argjson t "$NOW" '.brief_pending=false | .resumed_epoch=$t'
 }
 
+# Timed pauses ("until tomorrow 9 AM") end by themselves.
+for f in "${FILES[@]}"; do
+  [ "$(jq -r .status "$f")" = "paused" ] || continue
+  pu=$(jq -r '.paused_until // 0' "$f")
+  if [ "$pu" -gt 0 ] && [ "$NOW" -ge "$pu" ]; then
+    r=$(bash "$BOTSH" review resume "$(jq -r .url "$f")"); log "$(jq -r .url "$f"): pause ended — $r"
+  fi
+done
+
 # Reconcile with GitHub: a merged/closed PR ends its loop (and must never get a stale brief).
 for f in "${FILES[@]}"; do
-  case "$(jq -r .status "$f")" in merged|closed|cancelled) continue ;; esac
+  case "$(jq -r .status "$f")" in merged|closed|cancelled|paused) continue ;; esac
   ghs=$(gh pr view "$(jq -r .url "$f")" --json state --jq .state 2>/dev/null)
   if [ "$ghs" = "MERGED" ] || [ "$ghs" = "CLOSED" ]; then
     upd "$f" --arg s "$(echo "$ghs" | tr 'A-Z' 'a-z')" '.status=$s | .brief_pending=false'
     log "$(jq -r .url "$f"): $ghs on GitHub — loop finished"
+    # also in loop.log — the file the menu bar's "Open babysitter log" opens
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $(jq -r '"\(.repo)#\(.pr)"' "$f") $ghs on GitHub — loop finished" >> "$DIR/loop.log"
   fi
 done
 
@@ -773,6 +806,7 @@ DISPATCHED=0
 for f in "${FILES[@]}"; do
   [ "$DISPATCHED" -ge 1 ] && break     # one resume per sweep — RAM on a 16 GB machine
   st=$(jq -r .status "$f"); url=$(jq -r .url "$f")
+  [ "$st" = "paused" ] && continue                     # paused: nothing goes to the chat either
   if [ "$(jq -r '.brief_pending // false' "$f")" = "true" ]; then
     hb=$(jq -r '.heartbeat // 0' "$f")
     sid=$(jq -r '.session_id // ""' "$f")
