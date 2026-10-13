@@ -93,6 +93,7 @@ all three OSes).
 3. Write `claude/settings.local.json` → `~/.claude/settings.local.json` (skill overrides only; drop overrides for skills that weren't copied).
 
 ### global-claude-md
+0. Also copy `claude/docs/` → `~/.claude/docs/` — CLAUDE.md is deliberately short and defers to these reference files (`brain.md`, `jev.md`, `env.md`, `browsing.md`).
 1. Copy `claude/CLAUDE.md` → `~/.claude/CLAUDE.md`.
 2. Copy `extras/harsha-slack-writing-style.md` somewhere stable (ask user; default `~/Documents/`), then update the path reference inside CLAUDE.md.
 3. If the brain is not being restored, tell the user the "Personal Brain" section will be inert until `~/brain` exists (it's safe to leave in place).

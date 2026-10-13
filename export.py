@@ -44,7 +44,7 @@ SAFE_ENV_KEYS = {"EXPRESS_SERVER_URL", "ENABLE_CANVAS_SYNC", "PORT", "PATH", "HO
 SECRET_PATTERNS = [
     re.compile(r"\bapikey_[0-9a-f]{20,}"), re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}"), re.compile(r"\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]{16,}"),
     re.compile(r"\b(ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}"), re.compile(r"\bxox[abp]-[A-Za-z0-9\-]{10,}"), re.compile(r"\bcomp_[A-Za-z0-9]{16,}"),
-    re.compile(r"(?i)\b(api[_-]?key|secret|token|password)\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{24,}"),
+    re.compile(r"(?i)\b(api[_-]?key|secret|token|password)\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{24,}(?![A-Za-z0-9_.\-]*\()"),
     re.compile(r"\bey[A-Za-z0-9_\-]{30,}\.[A-Za-z0-9_\-]{20,}\."),   # JWT
 ]
 SECRET_ALLOW = re.compile(r"(re\.compile|<[A-Z_]+>|PLACEHOLDER|example|\\b\(|regex|pattern|mask)")
@@ -106,6 +106,8 @@ def sync_claude_dir() -> None:
     off = disabled_skills()
     say(f"claude/CLAUDE.md, settings.json, settings.local.json ({len(off)} disabled skills dropped)")
     shutil.copy2(C / "CLAUDE.md", REPO / "claude/CLAUDE.md")
+    if (C / "docs").is_dir():
+        rsync(C / "docs", REPO / "claude/docs", [".DS_Store", "*.bak*"])
     for name in ("settings.json", "settings.local.json"):
         src = C / name
         if src.exists():
@@ -283,7 +285,9 @@ def build_manifest() -> None:
 
     components = [
         comp("core-settings", payload=["claude/settings.json", "claude/settings.local.json"]),
-        comp("global-claude-md", payload=["claude/CLAUDE.md", "extras/harsha-slack-writing-style.md"]),
+        comp("global-claude-md", payload=["claude/CLAUDE.md", "claude/docs/", "extras/harsha-slack-writing-style.md"],
+             label="Global CLAUDE.md + its reference docs (brain, jev, env, browsing) + writing style guide",
+             notes="CLAUDE.md is the short always-loaded file; it points at ~/.claude/docs/*.md for detail - copy claude/docs/ to ~/.claude/docs/ alongside it. References ~/brain (separate system); if the brain is not restored, expect harmless noise from the brain section."),
         comp("skills", label=f"Personal skills ({len(skills)}) — copied from this repo into ~/.claude/skills/", payload=["claude/skills/"],
              target="~/.claude/skills/", default=True, sub_selectable=True, items=skills, not_exported=off,
              notes="`not_exported` lists skills the owner turned off with skillOverrides on the source machine — they are not part of the setup and are not in this repo."),

@@ -20,14 +20,15 @@
     },
     {
       "id": "global-claude-md",
-      "label": "Global CLAUDE.md (personal brain rules, model tiering, agent-browser default, writing style)",
+      "label": "Global CLAUDE.md + its reference docs (brain, jev, env, browsing) + writing style guide",
       "payload": [
         "claude/CLAUDE.md",
+        "claude/docs/",
         "extras/harsha-slack-writing-style.md"
       ],
       "target": "~/.claude/CLAUDE.md; style guide to a path of user's choice (update the reference inside CLAUDE.md)",
       "default": true,
-      "notes": "References ~/brain (separate system) — if brain is not restored, comment out the Personal Brain section or expect harmless noise."
+      "notes": "CLAUDE.md is the short always-loaded file; it points at ~/.claude/docs/*.md for detail - copy claude/docs/ to ~/.claude/docs/ alongside it. References ~/brain (separate system); if the brain is not restored, expect harmless noise from the brain section."
     },
     {
       "id": "skills",

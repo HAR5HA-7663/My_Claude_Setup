@@ -1,0 +1,21 @@
+# Universal Env File (with-env) — full reference
+
+> Moved out of `~/.claude/CLAUDE.md` on 2026-10-06 to keep it small. CLAUDE.md keeps the hard rules; this is the full reference.
+
+## Universal Env File — `~/.env` via `with-env`
+
+All of Harsha's API keys live in **`~/.env`** (mode 600), grouped into owner blocks: **`[personal]`, `[bevri]`, `[teli]`, `[fsbo]`, `[other]`** (any new `[block]` header works). It is loaded **on demand only** — never sourced from `.zshenv`/`.zshrc`, so normal shells and their child processes do not see the secrets (deliberate: this machine has a malware history). Set up 2026-09-21.
+
+- **Same product, different company:** the same NAME (e.g. `STRIPE_SECRET_KEY`) can exist in several blocks. `with-env` always hands it to the command under its plain NAME, so tools work unchanged — the block decides *whose* key it is.
+- **Pick the block from the work, not from convenience.** Bevri task → `--scope bevri`, Teli → `--scope teli`, FSBO → `--scope fsbo`. Never substitute another company's key because the right block is empty — stop and ask Harsha to add it. A name that exists in more than one block errors without `--scope` (by design, never guessed).
+- **See what exists:** `with-env --blocks [--scope S]` (blocks + key counts), `with-env --list [--scope S]` (names only), `with-env --has NAME [--scope S]`. Check here before asking Harsha for a key.
+- **Use a key:** `with-env --scope bevri --only NAME[,NAME2] <cmd>`. Lookup order: the exact `[bevri]` block → project blocks `[bevri/...]` → scratch copies (`tmp/`, worktrees). Within a step every block holding NAME must agree on the value, otherwise it errors and lists the blocks — then pass the exact block (`--scope bevri/api-backend`). It prints `NAME <- [block]` on stderr: **read that line** to confirm which repo/rig supplied the value (wrong-DB hazard). It never crosses owners. `--scope <exact block>` with no `--only` loads that whole block; loading every block at once is refused. Variables expand in the child shell, so wrap references: `with-env --only TYPESAFE_API_KEY sh -c 'curl -H "Authorization: Bearer $TYPESAFE_API_KEY" ...'`.
+- **Scripts / hooks / launchd jobs** that need a key call `with-env` themselves (`~/.local/bin/with-env`) — they do not inherit it.
+- **Never print values.** Do not `cat`/Read `~/.env`, `echo` a variable, run `env`/`printenv` under `with-env`, or use `curl -v` with an auth header. Values must not land in the transcript.
+- **New keys:** Harsha adds a `NAME=value` line under the right block in `~/.env` himself and tells you the block + name. If he pastes a secret in chat anyway, append it to `~/.env` without echoing it and remind him that it is now in the transcript and should be rotated.
+- **Never copy these into `~/.claude/settings.json`'s `env` block** (or anything else under `~/.claude/`) — that tree is published to the public `My_Claude_Setup` repo.
+- **Project `.env` files are mirrored, not moved.** `env-sync` (`~/.local/bin/env-sync`, `--dry-run` to preview) scans the whole home dir and copies every real `.env` / `.env.*` / `*.env` into an `[owner/path-to-repo]` block inside that owner's section of `~/.env` (`@local` = `.env.local`; identical copies deduped; examples/templates skipped; scratch copies listed last in each section). The project file stays the source of truth because the apps read it — **never delete or edit a project `.env` as part of this, and never hand-edit a block that has a `# source:` line** (regenerated every run); change the project file and re-run `env-sync`. Run `env-sync` after adding or changing a project `.env`. Several mirrored blocks are QA/demo rigs (`bevri/tmp/*`, worktrees) — check the `# source:` path before assuming a block is prod or local.
+- Blocks without a `# source:` line (`[personal]`, `[bevri]`, `[teli]`, `[fsbo]`, `[other]`, anything Harsha adds) are hand-edited, preserved by `env-sync`, and exist nowhere else; `~/.env.bak` is the previous version, written on every sync.
+- **Never open `~/.env` with Read or print it unmasked** — it now holds ~500 live secrets. To inspect structure: `sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1=•••/' ~/.env`.
+- `with-env` fails closed if `~/.env` is not mode 600/400.
+
