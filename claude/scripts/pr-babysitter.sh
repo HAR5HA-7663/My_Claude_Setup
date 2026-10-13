@@ -17,7 +17,7 @@
 #
 # Review loop (added 2026-10-01) — same script, `review` mode, driven by the hooks:
 #   bevri-ai    -> Alex reviews via his Telegram bot @teli_review_bot (sent as Harsha with
-#                  the `tg` CLI); 3 send-backs -> Slack PR group tagging Arbaaz.
+#                  the `tg` CLI); loops until the bot approves, then deploys (10-12).
 #   teli-ai-llc -> Pranta reviews on GitHub (reviews + PR comments); loop until approved.
 #   pr-babysitter.sh review request|watch|rearm|status|save-brief <pr-url>
 #   pr-babysitter.sh sweep      (launchd com.harsha.pr-babysitter-sweep, every 5 min) —
@@ -219,9 +219,11 @@ notify TIMEOUT "checks still pending after ~20 min — stopping (re-launch to ke
 # round until he approves. No round cap for teli. (GitHub webhooks would need repo
 # admin, which we don't have on teli-ai-llc, so this polls `gh api` once a minute.)
 #
-#   review request <pr-url>   send "PR <n> <repo>" to the bot (next round), or —
-#                                    once MAX_BOT_ROUNDS rounds were sent back — print the
-#                                    Slack escalation (tag Arbaaz) for the agent to send
+#   review request <pr-url> [note]   ask the bot (plain language) to review now, ignoring CI,
+#                                    and approve if the code is good. No round cap (10-12): the
+#                                    loop runs until Alex's bot approves; no Arbaaz escalation.
+#   review say <pr-url> <message>    talk to the bot about the PR (push back on a finding, ask what
+#                                    it wants, explain a design choice); prints its reply
 #   review watch <pr-url>     poll the bot's Telegram replies + GitHub reviews;
 #                                    exit 0 = approved / nothing to do,
 #                                    exit 2 = changes requested (brief on stdout, for rewake)
@@ -238,7 +240,6 @@ notify TIMEOUT "checks still pending after ~20 min — stopping (re-launch to ke
 review_main() {
 
 BOT="@teli_review_bot"
-MAX_BOT_ROUNDS=${MAX_BOT_ROUNDS:-3}      # bot rounds before escalating to a human
 POLL_S=${POLL_S:-60}
 WATCH_S=${WATCH_S:-3300}                 # one window; stays under the async hook's 3600 s timeout
 MAX_WAIT_H=${MAX_WAIT_H:-12}             # stop re-arming after this long without a verdict
@@ -308,6 +309,10 @@ pause)
   log "paused (was $(get .paused_from))${UNTIL:+ until $(date -r "$UNTIL" '+%a %H:%M')}"
   echo "paused PR #$PR${UNTIL:+ until $(date -r "$UNTIL" '+%a %H:%M')}"; exit 0 ;;
 
+forget)
+  # "Remove from list" in the menu bar: gone for good (still in the log), nothing polls it.
+  put '.status="removed"'; log "removed from the list"; echo "removed PR #$PR from the list"; exit 0 ;;
+
 stop)
   # "Stop tracking" from the menu bar — remembers where it was so it can be restarted.
   case "$(get .status)" in cancelled|merged|closed) echo "PR #$PR is $(get .status)"; exit 0 ;; esac
@@ -320,6 +325,19 @@ resume)
   # while paused are still picked up (the watch reads everything since the round started).
   put '.status=(.paused_from // .stopped_from // "waiting") | del(.paused_from) | del(.paused_until) | del(.stopped_from) | .heartbeat=0'
   log "resumed ($(get .status))"; echo "resumed PR #$PR ($(get .status))"; exit 0 ;;
+
+followup)
+  # Fast watch for the bot's Telegram verdict after the sweep sent a round (see the CI gate).
+  OUT=$(POLL_S="${FOLLOWUP_POLL_S:-15}" WATCH_S="${FOLLOWUP_S:-1500}" bash "$HOME/.claude/scripts/pr-babysitter.sh" review watch "$URL"); RC=$?
+  if [ "$RC" -eq 2 ] && ! printf '%s' "$OUT" | head -1 | grep -qE 'still waiting on|^No verdict from'; then
+    printf '%s' "$OUT" | bash "$HOME/.claude/scripts/pr-babysitter.sh" review save-brief "$URL"
+    log "followup: verdict saved — handing to the sweep for delivery now"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do   # the sweep may be mid-run (lock); retry for ~30 s
+      [ -d "$DIR/.sweep.lock.d" ] || { bash "$HOME/.claude/scripts/pr-babysitter.sh" sweep; break; }
+      sleep 3
+    done
+  fi
+  exit 0 ;;
 
 rearm)
   case "$(get .status)" in waiting|ci_pending) ;; *) echo "PR #$PR is '$(get .status)' — nothing to re-arm"; exit 0 ;; esac
@@ -347,34 +365,9 @@ request)
     echo "teli review round $NEXT armed for PR #$PR.$RR A background watcher wakes you on Pranta's next review or comment."
     exit 0
   fi
-  # C: Alex's bot answers "Not approved — wait for <check>" while CI is still running, which burns a
-  # round. So the bot is only asked once the PR's checks are green; until then the PR is
-  # "ci_pending" and the watcher sends it the moment they pass (FORCE_SEND=1 skips this gate).
-  if [ "${FORCE_SEND:-0}" != "1" ]; then
-    CHK=$(gh pr checks "$PR" --repo "$OWNER/$REPO" 2>&1); CRC=$?
-    if [ "$CRC" -ne 0 ] && ! echo "$CHK" | grep -qi 'no checks reported'; then
-      put --arg at "$NOW" '.status="ci_pending" | .ci_since=$at | .brief_pending=false | del(.delivered_to) | del(.since)'
-      log "ci-gated: checks not green yet (gh rc=$CRC) — bot request held until they pass"
-      echo "ci-gated: PR $PR's checks aren't green yet — the babysitter sends it to $BOT automatically once they pass (round $((ROUNDS + 1)) of $MAX_BOT_ROUNDS)."
-      exit 0
-    fi
-  fi
-  # B: a resend after a CI-only "Not approved" is not a new review round.
+  # 10-12: no CI gate (the bot's approval ignores CI by owner policy) and no round cap / Arbaaz
+  # escalation — the chat keeps working with the bot until it approves.
   CIR=$(get '.ci_retry // false')
-  if [ "$CIR" != "true" ] && [ "$ROUNDS" -ge "$MAX_BOT_ROUNDS" ]; then
-    put '.status="escalated"'
-    log "escalate: bot sent it back $ROUNDS times -> Slack $SLACK_GROUP tagging Arbaaz"
-    notify ESCALATE "bot sent it back $ROUNDS times — asking Arbaaz on Slack"
-    cat <<EOF
-ESCALATE — do NOT send this PR to the review bot again. Alex has sent it back $ROUNDS times through it.
-Send this ONE Slack message now with the Slack MCP (slack_send_message, channel_id "$SLACK_GROUP"; load it via ToolSearch if needed), as a real message, not a draft:
-
-<@$ARBAAZ_SLACK> pr request $PR alex sent it back $ROUNDS times through the review bot can you once review it and approve <$URL>
-
-Rules: keep <@$ARBAAZ_SLACK> literally (that is the @mention), keep the URL in angle brackets as the LAST thing on the line, Harsha's lowercase voice, no bold/bullets. Send it only to $SLACK_GROUP.
-EOF
-    exit 0
-  fi
   # One sender at a time; a forced (CI-green) send only if the PR is still waiting on CI.
   SLOCK="$DIR/.send-$OWNER-$REPO-$PR.lock.d"
   for _ in 1 2 3 4 5; do mkdir "$SLOCK" 2>/dev/null && break; sleep 2; done
@@ -382,15 +375,40 @@ EOF
   if [ "${FORCE_SEND:-0}" = "1" ] && [ "$(get .status)" != "ci_pending" ]; then
     echo "already sent (status=$(get .status))"; exit 0
   fi
-  OUT=$(tgr send "$BOT" "PR $PR $REPO") || { log "tg send FAILED: $OUT"; echo "FAILED to message $BOT: $OUT"; exit 1; }
+  NOTE="${3:-}"
+  MSG="review PR $PR $REPO now, ignore the CI checks and approve it if the code is good${NOTE:+. context from the author: $NOTE}"
+  OUT=$(tgr send "$BOT" "$MSG") || { log "tg send FAILED: $OUT"; echo "FAILED to message $BOT: $OUT"; exit 1; }
   MID=$(echo "$OUT" | sed -nE 's/^sent id=([0-9]+).*/\1/p')
   if [ "$CIR" = "true" ]; then NEXT=$ROUNDS; [ "$NEXT" -lt 1 ] && NEXT=1; else NEXT=$((ROUNDS + 1)); fi
   put --argjson mid "${MID:-0}" --arg at "$NOW" --argjson n "$NEXT" \
       '.rounds=$n | .last_sent_id=$mid | .sent_at=$at | del(.since) | .ci_retry=false | .brief_pending=false | del(.delivered_to) | .status="waiting"'
-  log "round $NEXT/$MAX_BOT_ROUNDS sent to $BOT (tg msg $MID)$( [ "$CIR" = "true" ] && echo ' — CI-only resend, not a new round')"
-  echo "sent 'PR $PR $REPO' to $BOT — review round $NEXT of $MAX_BOT_ROUNDS; a background watcher picks up the verdict."
+  log "round $NEXT sent to $BOT (tg msg $MID)$( [ "$CIR" = "true" ] && echo ' — CI-only resend, not a new round')"
+  echo "asked $BOT to review PR $PR now (round $NEXT, CI ignored); a background watcher picks up the verdict."
   exit 0
   ;;
+
+say)
+  # Free-text conversation with the bot about this PR. Does not start a round; prints the bot's
+  # replies (skipping queue acks) so the chat can act on them.
+  MSG="${3:-}"; [ -z "$MSG" ] && { echo "usage: review say <pr-url> <message>"; exit 1; }
+  case "$MSG" in *"$PR"*) ;; *) MSG="about PR $PR $REPO: $MSG" ;; esac
+  OUT=$(tgr send "$BOT" "$MSG") || { echo "FAILED to message $BOT: $OUT"; exit 1; }
+  MID=$(echo "$OUT" | sed -nE 's/^sent id=([0-9]+).*/\1/p'); log "say: sent to $BOT (tg msg $MID): ${MSG:0:120}"
+  END=$(( $(date +%s) + ${SAY_WAIT_S:-600} )); GOT=""; QUIET=0
+  while [ "$(date +%s)" -lt "$END" ]; do
+    sleep 10
+    NEW=$(tgr json "$BOT" 20 2>/dev/null | jq -r --argjson sid "${MID:-0}" '
+      [ .[] | select(.out == false and .id > $sid) | select(.text | test("^Queued review|Re-reviewing automatically") | not) | .text ] | join("\n\n---\n\n")' 2>/dev/null)
+    if [ -n "$NEW" ]; then
+      [ "$NEW" = "$GOT" ] && QUIET=$((QUIET + 1)) || QUIET=0; GOT="$NEW"
+      [ "$QUIET" -ge 2 ] && break      # nothing more for ~20 s after the last reply
+    fi
+  done
+  [ -z "$GOT" ] && { echo "no reply from $BOT within ${SAY_WAIT_S:-600}s"; exit 3; }
+  printf '%s replied:\n\n%s\n' "$BOT" "$GOT"
+  printf '%s' "$GOT" | grep -qE '^bevri-ai/[^ ]+ #[0-9]+' && echo "
+(That includes a review verdict — the babysitter's watcher handles it like any other round.)"
+  exit 0 ;;
 
 watch)
   # Remember which Claude Code chat owns this PR (the asyncRewake goes back to it; kept
@@ -426,7 +444,12 @@ watch)
       if [ "$CRC" -eq 0 ] || echo "$CHK" | grep -qi 'no checks reported'; then
         R=$(FORCE_SEND=1 PR_REVIEW_BOT_DIR="$DIR" TG_BIN="$TG" bash "$HOME/.claude/scripts/pr-babysitter.sh" review request "$URL")
         log "watch: checks green — $R"
-        echo "$R" | grep -q '^ESCALATE' && { echo "$R"; exit 2; }
+        # Sent from the sweep (no chat watcher running): the bot's verdict comes on Telegram, which
+        # the GitHub push listener never sees — so start a short fast follow-up for it.
+        if [ "${ONESHOT:-0}" = "1" ] && echo "$R" | grep -q '^sent '; then
+          nohup env -u ONESHOT bash "$HOME/.claude/scripts/pr-babysitter.sh" review followup "$URL" >/dev/null 2>&1 &
+          log "watch: fast Telegram follow-up started (15 s polls, 25 min)"
+        fi
         SENT_ID=$(get .last_sent_id); SENT_AT=$(get .sent_at); ROUND=$(get .rounds)
         continue
       elif [ "$GHM" = "CONFLICTING" ] && [ "${CONFLICT_SENT:-}" != "1" ]; then
@@ -452,7 +475,7 @@ EOF
       put --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status="ci_failed" | .since=$at'; log "watch: CI FAILED — waking the chat"
       notify CIFAIL "a check failed — waking the PR's session"
       cat <<EOF
-A CI check on PR #$PR ($OWNER/$REPO) FAILED, so it has NOT been sent to $WHO's review bot yet (the bot rejects PRs with red or pending checks).
+A CI check on PR #$PR ($OWNER/$REPO) FAILED. The review bot ignores CI, but the PR cannot merge (deploy) until the checks pass.
 
 Failing checks:
 $(echo "$CHK" | grep -iE 'fail|error|cancel' | head -20)
@@ -462,7 +485,7 @@ You opened this PR, so you have the context. Do this now, before other work:
 1. Look at the failing run (gh pr checks $PR --repo $OWNER/$REPO, then gh run view <id> --log-failed) and fix the cause on the PR's own branch. If it is flaky/infra and not your change, re-run it (gh run rerun <id> --failed) instead.
 2. Commit and push to the PR branch (never force-push a shared branch).
 3. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
-   That waits for the checks again and sends it to the bot once they pass.
+   That sends it to the bot again (CI ignored) and starts a new watcher.
 The babysitter is watching this PR — do not start your own watchers or polling loops; it wakes you when there is something to do.
 EOF
       exit 2
@@ -560,7 +583,12 @@ Alex's verdict:
 ${BOTTXT:-<from GitHub>}
 
 Auto-merge is $AM on this PR.
-$( [ "$AM" = "armed" ] && echo "It merges by itself once the required checks pass — nothing to do but confirm it landed (and any post-merge checks you promised)." || echo "Auto-merge is off (the risk check flagged it), so a person merges it. If Harsha already told you to merge it once it was approved, merge it now: gh pr merge $PR --repo $OWNER/$REPO --merge (checks are green), then do any post-merge checks you promised. Otherwise tell Harsha it is approved and waiting for his go." )
+$( RF=$(grep -E "$OWNER/$REPO#$PR: .*jev-risk: FLAGGED" "$HOME/.claude/scripts/pr-babysitter-hook.log" 2>/dev/null | tail -1)
+   if [ -n "$RF" ]; then echo "The Jev risk check FLAGGED this PR (billing/schema/auth/deploy config), so auto-merge stays off and you must NOT merge or arm it. Tell Harsha it is approved and waiting for his go to merge."
+   elif [ "$AM" = "armed" ]; then echo "Auto-merge is armed, so it deploys by itself once the required checks pass."
+   else echo "Deploy it: gh pr merge $PR --repo $OWNER/$REPO --auto --merge (falls back to --squash if merge commits are not allowed)."; fi )
+Then make sure it actually lands: if a required check is red (gh pr checks $PR --repo $OWNER/$REPO), fix it on the PR branch and push. The bot re-reviews the new commit on its own; if it asks for changes, the babysitter wakes you again. Confirm the merge and do any post-merge checks you promised.
+If the approval lists optional improvements, do them in a follow-up only if Harsha asks; do not hold the deploy for them.
 EOF
       exit 2
     fi
@@ -583,6 +611,11 @@ $INLINE}
 You opened this PR, so you have the context. Do this now, before other work:
 1. Also read the PR yourself (gh pr view $PR --repo $OWNER/$REPO --comments, and the review threads) so nothing above is missed.
    Address EVERY point on the PR's own branch (the worktree/branch you opened it from). If a requested change is wrong, unsafe, or needs a product decision, stop and ask Harsha instead of guessing.
+   Clear EVERYTHING in one round, not just the blocker:
+   a. Every "Needed for approval" item AND every "Should fix (nonblocking)" / "Optional improvement" / nit. Nonblocking notes come back as the next round's blockers (#5331: the tag-acceptance should-fix at 16:08 was the blocker at 16:29).
+   b. Each finding is a class, not a line: search the WHOLE PR diff (gh pr diff $PR --repo $OWNER/$REPO) for every other place with the same defect (overlapping/unserialized writes, state lost on refresh or rollback, writes not scoped to the right record, fields silently dropped, optimistic state set before the save succeeds) and fix those too, with a regression test each.
+   c. Before pushing, review the full PR diff yourself as a strict reviewer would (or run /code-review high on it) and fix what you find. The goal is that the next review finds nothing new.
+   d. Push ONCE, after everything is fixed and tests pass. Every push re-notifies the reviewer, so pushing half-done work burns a review round on code that is not finished.
 2. Commit and push to the PR branch (never force-push a shared branch); merge origin/main in if it is behind.
 3. Post ONE PR comment with gh pr comment, same style as earlier rounds: "Round $ROUND addressed in \`<sha>\`" then each item number and what changed (tests run + result).
 4. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
@@ -591,9 +624,8 @@ The babysitter is watching this PR — do not start your own watchers or polling
 EOF
       exit 2
     fi
-    LEFT=$((MAX_BOT_ROUNDS - ROUND))
     cat <<EOF
-Alex reviewed PR #$PR ($OWNER/$REPO) via @teli_review_bot — round $ROUND of $MAX_BOT_ROUNDS — and did NOT approve it.$( [ "$VERDICT" = "unclear" ] && echo " (Verdict could not be classified automatically — read it and judge: if it is actually an approval, do nothing and say so.)" )
+Alex reviewed PR #$PR ($OWNER/$REPO) via @teli_review_bot — round $ROUND — and did NOT approve it.$( [ "$VERDICT" = "unclear" ] && echo " (Verdict could not be classified automatically — read it and judge: if it is actually an approval, do nothing and say so.)" )
 
 Alex's reply through the bot (Telegram):
 ${BOTTXT:-<none — the verdict came from GitHub>}
@@ -610,11 +642,18 @@ $(A=$(scan_alerts); [ -n "$A" ] && printf '\nOpen code-scanning alerts on this P
 
 You opened this PR, so you have the context. Do this now, before other work:
 1. Also read the PR yourself (gh pr view $PR --repo $OWNER/$REPO --comments, and the review threads) so nothing above is missed.
-   Address EVERY point on the PR's own branch (the worktree/branch you opened it from). "Wait for check X" items need no action — the babysitter holds the resend until checks pass. Fix what Alex asked for; do not reply to him through the bot.
+   Address EVERY point on the PR's own branch (the worktree/branch you opened it from). "Wait for check X" items need no action — the bot is told to ignore CI.
+   The bot understands plain language, so talk to it when that helps:  bash ~/.claude/scripts/pr-babysitter.sh review say $URL "<message>"
+   (prints its reply). Use it to ask what exactly a finding wants, to point out a finding that is wrong (with the file:line evidence), or to explain a design choice. Don't argue to dodge a real defect.
+   Clear EVERYTHING in one round, not just the blocker:
+   a. Every "Needed for approval" item AND every "Should fix (nonblocking)" / "Optional improvement" / nit. Nonblocking notes come back as the next round's blockers (#5331: the tag-acceptance should-fix at 16:08 was the blocker at 16:29).
+   b. Each finding is a class, not a line: search the WHOLE PR diff (gh pr diff $PR --repo $OWNER/$REPO) for every other place with the same defect (overlapping/unserialized writes, state lost on refresh or rollback, writes not scoped to the right record, fields silently dropped, optimistic state set before the save succeeds) and fix those too, with a regression test each.
+   c. Before pushing, review the full PR diff yourself as a strict reviewer would (or run /code-review high on it) and fix what you find. The goal is that the next review finds nothing new.
+   d. Push ONCE, after everything is fixed and tests pass. Every push makes the review bot re-review automatically, so pushing half-done work burns a review round on code that is not finished.
    If a requested change is wrong, unsafe, or needs a product decision, stop and ask Harsha instead of guessing.
 2. Commit and push to the PR branch (never force-push a shared branch).
-3. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL
-   $( [ "$LEFT" -gt 0 ] && echo "That waits for the checks to pass, sends it back to the bot ($LEFT bot round(s) left) and starts a new watcher." || echo "Bot rounds are used up — that command prints the Slack escalation (tag Arbaaz in the PR group); send it exactly as printed." )
+3. Then run:  bash ~/.claude/scripts/pr-babysitter.sh review request $URL "<one line: what you fixed, and anything the reviewer should know>"
+   That asks the bot to review it now (CI ignored, approve if the code is good) and starts a new watcher. This repeats until it approves; then you deploy it.
 The babysitter is watching this PR — do not start your own watchers or polling loops; it wakes you when there is something to do.
 EOF
     exit 2
@@ -687,6 +726,16 @@ shopt -s nullglob
 FILES=("$DIR"/*.json)
 # Only PRs owned by a chat on THIS machine (its cwd exists here). Both Macs receive every
 # pr-push event; a PR tracked from the other device is never polled, resumed or resubmitted here.
+# Merged/closed is GitHub's truth, so it is safe to record from any device — and it must run
+# before the device filter below, which drops PRs whose worktree was already cleaned up after merge.
+for f in ${FILES[@]+"${FILES[@]}"}; do
+  case "$(jq -r .status "$f")" in merged|closed|removed) continue ;; esac
+  ghs=$(gh pr view "$(jq -r .url "$f")" --json state --jq .state 2>/dev/null)
+  if [ "$ghs" = "MERGED" ] || [ "$ghs" = "CLOSED" ]; then
+    t=$(mktemp "$f.XXXX") && jq --arg s "$(echo "$ghs" | tr 'A-Z' 'a-z')" '.status=$s | .brief_pending=false' "$f" > "$t" && mv "$t" "$f"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $(jq -r '"\(.repo)#\(.pr)"' "$f") $ghs on GitHub — loop finished" >> "$DIR/loop.log"
+  fi
+done
 OWN=()
 for f in ${FILES[@]+"${FILES[@]}"}; do
   c=$(jq -r '.cwd // ""' "$f" 2>/dev/null)
@@ -727,7 +776,10 @@ dispatch() {   # <state-file> <brief>
     upd "$f" '.brief_pending=false'; return
   fi
   last=$(jq -r '.resumed_epoch // 0' "$f")
-  [ $((NOW - last)) -lt "$REDISPATCH_S" ] && { log "$url: resumed $((NOW - last))s ago — not again yet"; return; }
+  # Guard against re-sending the same update; a new verdict (new brief_at) always goes through.
+  if [ "$(jq -r '.resumed_for // ""' "$f")" = "$(jq -r '.brief_at // ""' "$f")" ] && [ $((NOW - last)) -lt "$REDISPATCH_S" ]; then
+    log "$url: this update was sent $((NOW - last))s ago — not again yet"; return
+  fi
   kind=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s)][0].kind // ""')
   local bstate
   bstate=$(printf '%s' "$AGENTS" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s)][0].state // ""')
@@ -745,14 +797,14 @@ dispatch() {   # <state-file> <brief>
 $brief" 2>&1 | tail -3)
     log "$url: idle background chat $sid stopped + resumed with the brief: $(echo "$out" | tr '\n' ' ' | cut -c1-160)"
     notify "${url##*/pull/}" "$url — sent the update to its chat"
-    upd "$f" --argjson t "$NOW" --arg s "$sid" '.brief_pending=false | .delivered_to=$s | .resumed_epoch=$t'; return
+    upd "$f" --argjson t "$NOW" --arg s "$sid" '.brief_pending=false | .delivered_to=$s | .resumed_epoch=$t | .resumed_for=(.brief_at // "")'; return
   fi
   if [ -n "$kind" ]; then
     # Alive but its watcher is gone, so it never got this. Resuming would fork a copy of a
     # live chat — tell Harsha instead; the brief stays pending for when that chat closes.
     log "$url: owning chat $sid is alive ($kind) but not watching — notify"
     notify "${url##*/pull/}" "review feedback on $url — chat $sid isn't watching; tell it: bash ~/.claude/scripts/pr-babysitter.sh review rearm $url"
-    upd "$f" --argjson t "$NOW" '.resumed_epoch=$t'; return
+    upd "$f" --argjson t "$NOW" '.resumed_epoch=$t | .resumed_for=(.brief_at // "")'; return
   fi
   [ -d "$cwd" ] || cwd="$HOME"
   local prompt="[pr-babysitter] This chat was closed when the review came back on $url, so it was resumed in the background to handle it. Act on it exactly as instructed below, then finish.
@@ -764,7 +816,7 @@ $brief"
   out=$(cd "$cwd" && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 "$CLAUDE_BIN" --bg --resume "$sid" "$prompt" 2>&1 | tail -5)
   log "$url: resumed $sid in background ($cwd): $(echo "$out" | tr '\n' ' ' | cut -c1-200)"
   notify "${url##*/pull/}" "review feedback on $url — resumed its chat in claude agents"
-  upd "$f" --argjson t "$NOW" '.brief_pending=false | .resumed_epoch=$t'
+  upd "$f" --argjson t "$NOW" '.brief_pending=false | .resumed_epoch=$t | .resumed_for=(.brief_at // "")'
 }
 
 # Timed pauses ("until tomorrow 9 AM") end by themselves.
@@ -778,7 +830,7 @@ done
 
 # Reconcile with GitHub: a merged/closed PR ends its loop (and must never get a stale brief).
 for f in "${FILES[@]}"; do
-  case "$(jq -r .status "$f")" in merged|closed|cancelled|paused) continue ;; esac
+  case "$(jq -r .status "$f")" in merged|closed|removed|paused) continue ;; esac
   ghs=$(gh pr view "$(jq -r .url "$f")" --json state --jq .state 2>/dev/null)
   if [ "$ghs" = "MERGED" ] || [ "$ghs" = "CLOSED" ]; then
     upd "$f" --arg s "$(echo "$ghs" | tr 'A-Z' 'a-z')" '.status=$s | .brief_pending=false'

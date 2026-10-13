@@ -125,8 +125,7 @@
     "stripe@claude-plugins-official": true,
     "vercel@claude-plugins-official": true,
     "jev-compact@jev-compact": true,
-    "jev-compact-trigger@jev-compact": true,
-    "telegram@anthropic-plugin-directory": true
+    "jev-compact-trigger@jev-compact": true
   },
   "extraKnownMarketplaces": {
     "caveman": {
@@ -181,5 +180,39 @@
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Bash(modal deploy:*) — this project's CLAUDE.md requires fresh explicit permission for every deploy; treat as a soft block pending confirmation even though 'modal' is a frequently-used CLI",
+      "Bash(aws:*) in /Users/HAR5HA/Desktop/teli without --profile teli — wrong-profile risk explicitly called out in CLAUDE.md (AccessDenied or silent cross-account writes)"
+    ],
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: Modal (serverless deploy target, multi-tenant envs); AWS (DynamoDB, S3) via `aws --profile teli`; Supabase (PostgreSQL)",
+      "**Repository visibility**: Not queryable here (no git remote configured in this checkout — 0 tracked files, no origin). Treat as unverified; do not assume private",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: Modal secrets (per-tenant, e.g. `bevri-teli-voice-secrets`, `telitest-teli-voice-secrets`) are source of truth; local `~/.env` via `with-env` CLI; never print values (no cat/echo/env/printenv of secrets, no curl -v with auth headers)",
+      "**Default / protected branches**: Unknown — no git remote in this checkout to query via gh; CLAUDE.md states a hard rule requiring explicit fresh permission for every git add/commit/push and every `modal deploy` across all four repos (teli-voice, transfer-sms-service, teli-react-app, teli-v2-app)",
+      "**CI/CD deploy targets**: Modal, per-tenant `--env` (e.g. bevri, telitest, citytwig, nine9, teli_partner, teli_in_house, bonzo, netlink, adlyft, hookset, cdp, vwm, sonar, origna8, swiftinvestments, fsbo, vorsa-crm-dev, vorsa-crm-prod, p1lending, pulse, hackathon, stage, main) — every `modal deploy` is a production push for that tenant; iOS app (teli-v2-app) deploys only via human-in-the-loop (Tao) after push to GitHub, never auto-pushable",
+      "**Network posture**: None configured",
+      "**Host containment**: None configured — assume an ordinary developer machine with open internet",
+      "**Source control**: The trusted repo and its remote(s) only — this checkout currently has no remotes configured, so there is no corroborated remote to trust; scope strictly to local work in /Users/HAR5HA/Desktop/teli until a remote is added",
+      "**Trusted internal domains**: app.teli.ai, sip.teli.ai (contacted repeatedly in this project's transcripts)",
+      "**Trusted cloud buckets**: teli-conversation-archive (config-derived — not a confirmed upload destination; uploads of local data still require confirmation)",
+      "**Key internal services**: api.retellai.com (Retell AI voice), app2.signalhouse.io (SignalHouse SMS/MMS), api.twilio.com (Twilio telephony), api.stripe.com (Stripe billing)",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: `.env`/`.env.local`/`.env.*` files across teli-react-app, teli-v2-app, teli-sh-board, transfer-sms-service/frontend; `secrets/login-credentials.txt`; `new-env-for-new-tenant/pulse-teli-voice-secrets.env`; PII-scrub code at `teli-react-app/backend/api/pii_scrub.py` and its tests; JWT signing-secret tests under various `.worktrees/*`; share only with audiences cleared at the named+specifics bar — treat all as credentials/PII, never commit or push",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any Modal env/app/table/secret whose name contains `prod` or `production` as a whole segment; also treat all Modal deploys as production for that tenant per CLAUDE.md (`modal deploy` always targets live tenant traffic, not just prod-named ones)",
+      "**Protected deployment namespaces / environments**: all Modal tenant environments (bevri, telitest, citytwig, nine9, teli_partner, teli_in_house, bonzo, netlink, adlyft, hookset, cdp, vwm, sonar, origna8, swiftinvestments, fsbo, vorsa-crm-dev, vorsa-crm-prod, p1lending, pulse, hackathon, stage, main) — every `modal deploy` is prod for that tenant; never deploy without explicit fresh permission",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (multi-tenant Voice+SMS platform: PR review, debugging, Modal deploys, AWS/DynamoDB/Supabase work)",
+      "**Trusted repo**: /Users/HAR5HA/Desktop/teli working directory — no git remote currently configured in this checkout (0 tracked files); CLAUDE.md references four sub-repos (teli-voice/, transfer-sms-service/, teli-react-app/, teli-v2-app/) under this path that require explicit fresh permission for every commit/push/deploy",
+      "**Org-specific CLIs**: modal, supabase, with-env, chk, aws (always with --profile teli for this project), agent-browser, stripe, codex, gh, jev-ask",
+      "**routine under /Users/HAR5HA/Desktop/teli/ prefix**: git status/diff/log, read-only grep/scans of the four repos, aws --profile teli read-only queries, modal app/list/history read-only queries — never commit, push, or deploy without fresh explicit permission per CLAUDE.md hard rule"
+    ]
+  },
   "voiceEnabled": true
 }
