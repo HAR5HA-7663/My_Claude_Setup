@@ -3,6 +3,7 @@
 #
 #   jev-replicate mac  user@host      # full Claude Code layer: CLI, hooks, skills, brain patches
 #   jev-replicate pi   user@host      # brain query node only: Jev rerank + fixed store + key
+#   jev-replicate linux user@host     # headless Linux box: full Claude layer minus macOS-only parts
 #   add --dry-run to see what would change.
 #
 # Never copies ~/.env wholesale. Only TYPESAFE_API_KEY (+ for mac: TELEGRAM_API_ID/HASH for the
@@ -10,7 +11,7 @@
 # if not already there. The Telegram login session itself is never copied (two machines on one
 # auth key get it revoked) - the target logs in once with: ssh -t <target> tg login
 set -euo pipefail
-KIND="${1:?mac|pi}"; TARGET="${2:?user@host}"; DRY=""; [ "${3:-}" = "--dry-run" ] && DRY="--dry-run"
+KIND="${1:?mac|linux|pi}"; TARGET="${2:?user@host}"; DRY=""; [ "${3:-}" = "--dry-run" ] && DRY="--dry-run"
 SSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
 RS="rsync -az $DRY -e \"$SSH\""
 say() { printf '\n== %s\n' "$*"; }
@@ -173,6 +174,73 @@ REMOTE
   say "CLAUDE.md: copy the 'Jev Decision Layer' + 'Universal Env File' sections by hand if the target keeps its own CLAUDE.md"
   echo "   (not merged automatically — that file is hand-maintained per machine)"
 
+elif [ "$KIND" = "linux" ]; then
+  # Headless Linux compute box (home PC, Arch): mirror the laptop's Claude Code layer minus the
+  # macOS-only parts (launchd, menu bar apps, mem-guard, TCC cleaner, headed Chrome, voice).
+  # Browser automation stays headless there: the box sits in a shared home, no screen/sound.
+  say "CLI tools -> ~/.local/bin"
+  $SSH "$TARGET" 'mkdir -p ~/.local/bin ~/.claude ~/.config ~/Desktop/Personal'
+  eval $RS ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} "$TARGET:.local/bin/"
+  [ -f ~/.config/jev-gate.env ] && eval $RS ~/.config/jev-gate.env "$TARGET:.config/jev-gate.env"
+  say "~/.claude: CLAUDE.md, agents, commands, docs, skills, scripts, statusline"
+  eval $RS ~/.claude/{CLAUDE.md,settings.local.json,statusline-custom.sh,statusline.sh} "$TARGET:.claude/"
+  eval $RS --delete ~/.claude/{agents,commands,docs,statusline} "$TARGET:.claude/"
+  eval $RS --copy-links --delete ~/.claude/skills "$TARGET:.claude/"
+  eval $RS --exclude "'*.bak*'" --exclude "'*.pre-*'" --exclude "'*.log'" ~/.claude/scripts "$TARGET:.claude/"
+  [ -f ~/brain/assets/harsha-slack-writing-style.md ] && { $SSH "$TARGET" 'mkdir -p ~/brain/assets'; eval $RS ~/brain/assets/harsha-slack-writing-style.md "$TARGET:brain/assets/"; }
+  say "jev-compact plugin source -> ~/Desktop/Personal/jev-compact"
+  eval $RS --exclude .git --exclude node_modules ~/Desktop/Personal/jev-compact/ "$TARGET:Desktop/Personal/jev-compact/"
+  say "settings.json (laptop's, linux-adapted)"
+  REMOTE_HOME=$($SSH "$TARGET" 'echo $HOME')
+  python3 - "$REMOTE_HOME" > /tmp/jev-replicate-settings.$$ <<'PY'
+import json, os, sys
+home = sys.argv[1]
+d = json.load(open(os.path.expanduser("~/.claude/settings.json")))
+mac_only = ("mem-guard.sh", "tcc-clean-claude-residue.sh")
+for ev, groups in list(d.get("hooks", {}).items()):
+    for g in groups:
+        g["hooks"] = [h for h in g["hooks"] if not any(m in h.get("command", "") for m in mac_only)]
+    d["hooks"][ev] = [g for g in groups if g["hooks"]]
+env = d.setdefault("env", {})
+for k in ("AGENT_BROWSER_HEADED", "AGENT_BROWSER_EXECUTABLE_PATH"):
+    env.pop(k, None)                     # headless, bundled Chromium
+env["AGENT_BROWSER_PROFILE"] = f"{home}/.agent-browser/chrome-automation"
+env["CLAUDE_CODE_ENABLE_FUNCTION_HOOKS"] = "1"
+for p in ("swift-lsp@claude-plugins-official", "imessage@claude-plugins-official"):
+    d.get("enabledPlugins", {}).pop(p, None)
+mk = d.get("extraKnownMarketplaces", {}).get("jev-compact", {}).get("source", {})
+if mk.get("source") == "directory":
+    mk["path"] = f"{home}/Desktop/Personal/jev-compact"
+for k in ("voice", "voiceEnabled"):
+    d.pop(k, None)
+json.dump(d, sys.stdout, indent=2, ensure_ascii=False); print()
+PY
+  eval $RS /tmp/jev-replicate-settings.$$ "$TARGET:.claude/settings.json"; rm -f /tmp/jev-replicate-settings.$$
+  [ -n "$DRY" ] && { say "dry run: stopping before remote changes"; exit 0; }
+  say "remote: permissions, key, plugins, browser"
+  $SSH "$TARGET" "TS_KEY='$KEY' bash -s" <<'REMOTE'
+set -u
+export PATH="$HOME/.local/bin:$PATH"
+chmod 755 ~/.local/bin/{with-env,env-sync,jev-ask,jev-step,jab,jev-replicate} ~/.claude/scripts/*.sh ~/.claude/statusline*.sh 2>/dev/null
+mkdir -p ~/.local/state/jev
+if [ ! -f ~/.env ]; then printf '[personal]\nTYPESAFE_API_KEY=%s\n\n[bevri]\n\n[teli]\n\n[fsbo]\n\n[other]\n' "$TS_KEY" > ~/.env; chmod 600 ~/.env; echo "  ~/.env created with the key"
+elif ! grep -q '^TYPESAFE_API_KEY=' ~/.env; then awk -v k="$TS_KEY" '{print} /^\[personal\]$/ && !d {print "TYPESAFE_API_KEY=" k; d=1}' ~/.env > ~/.env.tmp && mv ~/.env.tmp ~/.env; chmod 600 ~/.env; echo "  key added to ~/.env"
+else echo "  key already present in ~/.env"; fi
+python3 - <<'PY'
+import json, os, subprocess
+d = json.load(open(os.path.expanduser("~/.claude/settings.json")))
+for name, m in d.get("extraKnownMarketplaces", {}).items():
+    src = m["source"]; arg = src.get("repo") or src.get("path")
+    subprocess.run(["claude", "plugin", "marketplace", "add", arg], capture_output=True)
+for p, on in d.get("enabledPlugins", {}).items():
+    if not on: continue
+    r = subprocess.run(["claude", "plugin", "install", p], capture_output=True, text=True)
+    print("  plugin", p, "ok" if r.returncode == 0 else "FAILED: " + (r.stderr or r.stdout).strip()[-120:])
+PY
+if command -v agent-browser >/dev/null; then agent-browser install >/dev/null 2>&1 && echo "  agent-browser chromium ready (headless)"; fi
+echo "  smoke test:"; printf 'git push --force origin main' | jev-ask --purpose replicate-test --noul risky "Would this rewrite shared git history?" | head -c 120; echo
+REMOTE
+
 elif [ "$KIND" = "pi" ]; then
   BR="${PI_BRAIN:-/mnt/nvme/brain}"
   say "brain Jev query layer -> $BR/scripts"
@@ -185,6 +253,6 @@ cd "$BR" && .venv/bin/python -c "import httpx, chromadb; print('  deps ok: httpx
 echo "  query smoke test:"; cd "$BR" && .venv/bin/python -m scripts.query "what is the teli carrier" --k 3 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print('   verdict', d['verdict'], 'by', d['verdict_source'], 'total', d['timings_ms']['total'], 'ms')"
 REMOTE
 else
-  echo "usage: jev-replicate mac|pi user@host [--dry-run]"; exit 2
+  echo "usage: jev-replicate mac|linux|pi user@host [--dry-run]"; exit 2
 fi
 say "done"
