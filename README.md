@@ -60,7 +60,7 @@ Know which bucket a skill is in before trying to install it.
 | **2. Plugin-provided** (73) | Not in this repo — ships inside a plugin | `/plugin install <plugin>@<marketplace>` |
 | **3. CLI-provided** (1) | Not in this repo — ships with an external CLI | Install the CLI (see `external-deps.md`) |
 
-## 1. Personal skills (28) — in `claude/skills/`
+## 1. Personal skills (29) — in `claude/skills/`
 
 Ask the user which of these they want. Group headings are just for the conversation;
 each folder is independent.
@@ -71,8 +71,8 @@ each folder is independent.
 **Orchestration & meta (4)**
 `loopengg` (loop-engineering orchestration mode: decompose → fan out to model-tiered subagents → adversarially verify → report) · `council` (5-advisor adversarial decision panel) · `skill-creator` · `mcp-builder`
 
-**Design & visual (13)**
-`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `motion-design` · `brand` · `brand-guidelines` · `canvas-design` · `theme-factory` · `slides` · `web-artifacts-builder` · `excalidraw`
+**Design & visual (14)**
+`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `motion-design` · `brand` · `brand-guidelines` · `canvas-design` · `theme-factory` · `slides` · `web-artifacts-builder` · `excalidraw` · `jj-frontend` (Jawad's UI craft standard: components, two-way motion, honest states, layout laws, plus a `ui_check.py` source gate)
 
 **Documents & writing (2)**
 `docx` · `pdf`

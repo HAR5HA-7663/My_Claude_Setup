@@ -2,7 +2,7 @@
   "name": "My_Claude_Setup",
   "owner": "HAR5HA-7663",
   "exported": "2026-08-02",
-  "updated": "2026-10-13",
+  "updated": "2026-10-18",
   "source_machine": "macOS (darwin 25.6.0), Claude Code 2.1.296",
   "install_doc": "INSTALL_AGENT.md",
   "export_script": "export.py",
@@ -32,7 +32,7 @@
     },
     {
       "id": "skills",
-      "label": "Personal skills (29) — copied from this repo into ~/.claude/skills/",
+      "label": "Personal skills (30) — copied from this repo into ~/.claude/skills/",
       "payload": [
         "claude/skills/"
       ],
@@ -87,6 +87,10 @@
         {
           "name": "frontend-design",
           "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, …"
+        },
+        {
+          "name": "jj-frontend",
+          "description": "Jawad's frontend craft standard (JJ) for building, porting and reviewing product UI in React and Tailwind apps. Every element is a reusable component (no siblings, no na…"
         },
         {
           "name": "loopengg",

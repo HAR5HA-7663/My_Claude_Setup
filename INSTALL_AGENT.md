@@ -22,7 +22,7 @@ max 4 options per question, so split across questions like this (or equivalent):
 - **Question 1 — Core** (all default ON):
   - Core settings (model, hooks wiring, statusline ref, permissions, env)
   - Global CLAUDE.md + writing style guide
-  - Personal skills (28) — *sub-selected in Phase 1b, never bulk-installed*
+  - Personal skills (29) — *sub-selected in Phase 1b, never bulk-installed*
   - Agents + slash commands
 - **Question 2 — Tooling** (default ON):
   - Hook + automation scripts (malware guards, PR babysitter, Jev risk gate, triage runners, mem-guard)
