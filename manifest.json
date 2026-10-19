@@ -57,18 +57,6 @@
           "description": "Brand voice, visual identity, messaging frameworks, asset management, brand consistency. Activate for branded content, tone of voice, marketing assets, brand compliance,…"
         },
         {
-          "name": "brand-guidelines",
-          "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or styl…"
-        },
-        {
-          "name": "canvas-design",
-          "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or…"
-        },
-        {
-          "name": "council",
-          "description": "Karpathy-style LLM Council for decisions. Runs 5 independent advisors in parallel (Contrarian, First Principles, Expansionist, Outsider, Executor), then anonymous peer r…"
-        },
-        {
           "name": "design",
           "description": "Comprehensive design skill: brand identity, design tokens, UI styling, logo generation (55 styles, Gemini AI), corporate identity program (50 deliverables, CIP mockups),…"
         },
@@ -109,10 +97,6 @@
           "description": "Morning message triage. Pulls the last ~14 hours of Slack (channels + DMs) and SMS, lets Jev score every message for needs-reply / urgency / kind / sensitivity in one ch…"
         },
         {
-          "name": "motion-design",
-          "description": ">"
-        },
-        {
           "name": "pdf",
           "description": "Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a…"
         },
@@ -125,10 +109,6 @@
           "description": "Create strategic HTML presentations with Chart.js, design tokens, responsive layouts, copywriting formulas, and contextual slide strategies."
         },
         {
-          "name": "theme-factory",
-          "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that …"
-        },
-        {
           "name": "ui-styling",
           "description": "Create beautiful, accessible user interfaces with shadcn/ui components (built on Radix UI + Tailwind), Tailwind CSS utility-first styling, and canvas-based visual design…"
         },
@@ -139,10 +119,6 @@
         {
           "name": "web-artifacts-builder",
           "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex …"
-        },
-        {
-          "name": "webapp-testing",
-          "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser scr…"
         },
         {
           "name": "wiki-ingest",
@@ -163,18 +139,8 @@
       ],
       "selection": "REQUIRED: sub-select. Show the user this list and copy ONLY the skills they pick. Never copy the whole folder without asking.",
       "not_exported": [
-        "algorithmic-art",
-        "auto-diagram",
         "banner-design",
         "doc-coauthoring",
-        "gsap-core",
-        "gsap-frameworks",
-        "gsap-performance",
-        "gsap-plugins",
-        "gsap-react",
-        "gsap-scrolltrigger",
-        "gsap-timeline",
-        "gsap-utils",
         "internal-comms",
         "pptx",
         "slack-gif-creator",
@@ -193,7 +159,7 @@
     },
     {
       "id": "commands",
-      "label": "Slash commands: /clipboard, /council",
+      "label": "Slash commands: /clipboard",
       "payload": [
         "claude/commands/"
       ],
@@ -855,8 +821,8 @@
     }
   ],
   "counts": {
-    "personal_skills": 29,
-    "personal_skills_disabled_not_exported": 16,
+    "personal_skills": 24,
+    "personal_skills_disabled_not_exported": 6,
     "plugins": 8,
     "plugin_skills": 77,
     "plugin_commands": 20,

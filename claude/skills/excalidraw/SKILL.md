@@ -1,6 +1,6 @@
 ---
 name: excalidraw
-description: Generate architecture diagrams on a live Excalidraw canvas when the user provides specific components, a sample diagram, or a textual description of what to draw. Use for data flow diagrams, parameter threading traces, call chain visualizations, exporting .excalidraw files to PNG/SVG, or converting existing .excalidraw files to image formats. Do NOT use for zero-config codebase analysis — use the auto-diagram skill instead.
+description: Generate architecture diagrams on a live Excalidraw canvas when the user provides specific components, a sample diagram, or a textual description of what to draw. Use for data flow diagrams, parameter threading traces, call chain visualizations, exporting .excalidraw files to PNG/SVG, or converting existing .excalidraw files to image formats.
 ---
 
 # Excalidraw Diagram Generator (MCP Edition)

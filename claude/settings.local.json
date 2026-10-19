@@ -3,18 +3,13 @@
     "allow": [
       "Bash(mkdir -p /Users/HAR5HA/harshas-claude-statusline)",
       "Bash(cp /Users/HAR5HA/.claude/statusline-custom.sh /Users/HAR5HA/harshas-claude-statusline/statusline.sh)",
-      "Bash(mkdir -p ~/.claude/skills/excalidraw/references ~/.claude/skills/auto-diagram)",
       "Bash(cp /tmp/excalidraw-toolkit/plugins/excalidraw/skills/excalidraw/SKILL.md ~/.claude/skills/excalidraw/SKILL.md)",
       "Bash(cp /tmp/excalidraw-toolkit/plugins/excalidraw/skills/excalidraw/references/colors.md ~/.claude/skills/excalidraw/references/colors.md)",
-      "Bash(cp /tmp/excalidraw-toolkit/plugins/excalidraw/skills/auto-diagram/SKILL.md ~/.claude/skills/auto-diagram/SKILL.md)",
       "Bash(ls *)"
     ]
   },
   "skillOverrides": {
-    "brand-guidelines": "user-invocable-only",
-    "canvas-design": "name-only",
     "job-applicator-temp": "off",
-    "job-ranker": "user-invocable-only",
-    "theme-factory": "name-only"
+    "job-ranker": "user-invocable-only"
   }
 }

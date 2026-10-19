@@ -10,7 +10,7 @@ Full export of Harsha's Claude Code environment (first exported 2026-08-02; refr
 > **which skills they actually need** — both the personal skills in this repo and the
 > skills that arrive with each plugin. Install **only** what they pick.
 >
-> Nobody needs 28 personal skills + 73 plugin skills. Most of them are dead weight for a
+> Nobody needs 24 personal skills + 73 plugin skills. Most of them are dead weight for a
 > given person, and every installed skill costs context on every single session.
 >
 > Full procedure: [`INSTALL_AGENT.md`](INSTALL_AGENT.md). Machine-readable catalog:
@@ -35,9 +35,9 @@ Full export of Harsha's Claude Code environment (first exported 2026-08-02; refr
 | `claude/settings.json` | Model (`claude-fable-5[1m]`), effort `xhigh`, fullscreen TUI, dark theme, voice (hold mode), auto permission mode, hooks, statusline wiring, enabled plugins, env vars |
 | `claude/settings.local.json` | Skill visibility overrides |
 | `claude/CLAUDE.md` | Global instructions: personal brain rules, subagent model tiering, Jev decision layer, universal `~/.env`, agent-browser + `jab`/`hunch` default, writing style |
-| `claude/skills/` | **28 personal skills** — see the catalog below. Sub-selectable; do not bulk-copy. (16 more exist on the source machine but are switched off there, so they are not exported — listed in `manifest.json` → `components[id=skills].not_exported`.) |
+| `claude/skills/` | **24 personal skills** — see the catalog below. Sub-selectable; do not bulk-copy. (6 more exist on the source machine but are switched off there, so they are not exported — listed in `manifest.json` → `components[id=skills].not_exported`.) |
 | `claude/agents/` | `poller` (haiku-pinned) and `scripted-runner` (sonnet-pinned) custom agents |
-| `claude/commands/` | `/clipboard`, `/council` slash commands |
+| `claude/commands/` | `/clipboard` slash command |
 | `claude/scripts/` | Hook + automation scripts (17): malware guards + IOC sync + daily host sweep, PR babysitter with Jev risk pre-filter, Jev Bash risk gate, verify-report, morning/monday triage runners, mem-guard, TCC residue cleaner |
 | `bin/` | CLI tools the hooks and skills call: `with-env` / `env-sync` (universal `~/.env`), `jev-ask`, `jev-step`, `jab`, `jev-replicate` → `~/.local/bin/` |
 | `launchd/` | macOS scheduled jobs: brain watcher + sync, daily brain sync, malware sweep, mem-guard, morning/monday triage (paths need rewriting) |
@@ -56,7 +56,7 @@ Know which bucket a skill is in before trying to install it.
 
 | Source | Where it lives | How to install |
 |---|---|---|
-| **1. Personal** (28) | `claude/skills/` in this repo | Copy the chosen folders → `~/.claude/skills/` |
+| **1. Personal** (24) | `claude/skills/` in this repo | Copy the chosen folders → `~/.claude/skills/` |
 | **2. Plugin-provided** (73) | Not in this repo — ships inside a plugin | `/plugin install <plugin>@<marketplace>` |
 | **3. CLI-provided** (1) | Not in this repo — ships with an external CLI | Install the CLI (see `external-deps.md`) |
 
@@ -68,17 +68,14 @@ each folder is independent.
 **Personal brain / wiki (6)** — *require `~/brain`, which is NOT in this repo. Skip all 6 if the user isn't restoring the brain.*
 `brain-query` · `brain-status` · `wiki-ingest` · `wiki-lint` · `wiki-query` · `wiki-save`
 
-**Orchestration & meta (4)**
-`loopengg` (loop-engineering orchestration mode: decompose → fan out to model-tiered subagents → adversarially verify → report) · `council` (5-advisor adversarial decision panel) · `skill-creator` · `mcp-builder`
+**Orchestration & meta (3)**
+`loopengg` (loop-engineering orchestration mode: decompose → fan out to model-tiered subagents → adversarially verify → report) · `skill-creator` · `mcp-builder`
 
-**Design & visual (14)**
-`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `motion-design` · `brand` · `brand-guidelines` · `canvas-design` · `theme-factory` · `slides` · `web-artifacts-builder` · `excalidraw` · `jj-frontend` (Jawad's UI craft standard: components, two-way motion, honest states, layout laws, plus a `ui_check.py` source gate)
+**Design & visual (10)**
+`design` · `design-system` · `frontend-design` · `ui-styling` · `ui-ux-pro-max` · `brand` · `slides` · `web-artifacts-builder` · `excalidraw` · `jj-frontend` (Jawad's UI craft standard: components, two-way motion, honest states, layout laws, plus a `ui_check.py` source gate)
 
 **Documents & writing (2)**
 `docx` · `pdf`
-
-**Testing (1)**
-`webapp-testing`
 
 **Personal automation (2)** — *Jev-triage skills: need the Slack plugin / Monday MCP, `bin/jev-ask` and a TypeSafe key. Report-only, never send anything.*
 `morning-triage` · `monday-triage`

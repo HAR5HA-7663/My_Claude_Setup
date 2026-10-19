@@ -40,7 +40,7 @@ the user reply with the numbers to install. **Never install anything not selecte
 
 ## Phase 1b — Ask WHICH SKILLS (REQUIRED, never skip, never bulk-install)
 
-Selecting "skills" in Phase 1 does **not** mean copy all 28. Selecting "plugins" does
+Selecting "skills" in Phase 1 does **not** mean copy all 24. Selecting "plugins" does
 **not** mean install all 8. Skills are the most context-expensive thing in this repo —
 every installed skill's name + description is loaded into every session — so an
 unwanted skill is a permanent tax, not a harmless extra.
@@ -62,7 +62,6 @@ has the same lists grouped for humans). Then:
      is NOT in this repo. If the user isn't restoring the brain, recommend skipping all 6.
    - `job-applicator`, `job-ranker` contain Harsha's personal résumé/application data.
      Only install if the new machine is his.
-   - The 8 `gsap-*` skills only matter to someone writing GSAP animations — all-or-nothing.
    - `agent-browser` is not in this repo at all (see the `skills` section below).
    - `imessage` and `swift-lsp` plugins are macOS-only — auto-deselect elsewhere and say so.
 4. **Record the selection** and use it in Phase 2 for both the file copy and the
@@ -197,7 +196,7 @@ Run through this checklist and report results honestly (don't claim success with
 2. `/plugins` lists the selected plugins; `/hooks` (or settings inspection) shows the installed hooks.
 3. The skill list shows **exactly** the skills the user selected — no more. If skills the
    user declined are showing up, find where they came from (a plugin they didn't ask for,
-   or a bulk copy) and remove them. `/council` and `/clipboard` resolve.
+   or a bulk copy) and remove them. `/clipboard` resolves.
 4. If hooks installed: `git push` in a scratch repo triggers the malware-guard status message.
 5. If MCP servers installed: `/mcp` shows them connected (monday will ask for OAuth — expected).
 6. If brain restored: new session auto-loads the brain context via the SessionStart hook.
